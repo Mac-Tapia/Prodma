@@ -1,0 +1,30 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+
+# Estado local de herramientas/sesiones (no compartir en el repo)
+.claude/
+.pytest_cache/
+.vscode/codex-terminal-bridge/
+
+# Salidas generadas por cada ejecución del pipeline (reproducibles, no versionadas)
+resultados/*
+!resultados/.gitkeep
+
+# Logs de entrenamiento generados automáticamente por CatBoost
+catboost_info/
+
+# Copias ejecutadas del notebook (con outputs/figuras embebidas) generadas al validar
+# desde terminal (ver docs/MANUAL_EJECUCION.md); el notebook versionado siempre queda
+# sin outputs.
+notebook/*_ejecutado.ipynb
+
+# Datos de entrada reales (pesan >100 MB c/u; GitHub los rechaza sin Git LFS,
+# y son datos de demanda/clientes que no deben publicarse). Se conservan en
+# local; solo se documenta su ubicación esperada.
+datahistorica/*
+!datahistorica/.gitkeep
+nuevosclientes/*
+!nuevosclientes/.gitkeep

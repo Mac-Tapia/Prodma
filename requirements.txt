@@ -1,0 +1,43 @@
+# Dependencias para notebook/proyecciondemanda.ipynb
+# Instalar con: pip install -r requirements.txt
+
+# Datos y cálculo numérico
+numpy>=1.26,<3
+pandas>=2.2,<3
+scipy>=1.11
+
+# Lectura/escritura de Excel
+xlrd>=2.0.1,<3
+openpyxl>=3.1,<4
+pyarrow>=15
+xlsxwriter>=3
+
+# Modelado y machine learning
+scikit-learn>=1.5,<1.8
+statsmodels>=0.14,<0.15
+xgboost>=2,<4
+lightgbm>=4,<5
+catboost>=1.2,<2
+joblib
+prophet>=1.1,<2
+
+# Optimización bayesiana de hiperparámetros (reemplaza GridSearchCV en la selección de modelos)
+optuna>=4,<6
+optuna-integration[sklearn]>=4,<6
+
+# Series temporales y calendario
+holidays
+
+# Visualización
+matplotlib
+seaborn
+
+# Utilidades
+psutil
+nbformat
+pytest>=8,<10
+
+# Entorno de notebook local para VS Code, y CLI de ejecución por fases (prodma.pipeline)
+jupyter
+ipykernel
+nbclient

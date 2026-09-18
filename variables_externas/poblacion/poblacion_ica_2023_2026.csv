@@ -1,0 +1,5 @@
+fecha,poblacion,dato,fuente
+2023-06-30,1041198,interpolado_lineal,INEI (2 puntos observados) + interpolacion/extrapolacion lineal declarada
+2024-06-30,1062346,observado_inei,INEI (2 puntos observados) + interpolacion/extrapolacion lineal declarada
+2025-06-30,1083494,extrapolado_lineal,INEI (2 puntos observados) + interpolacion/extrapolacion lineal declarada
+2026-06-30,1104642,extrapolado_lineal,INEI (2 puntos observados) + interpolacion/extrapolacion lineal declarada
