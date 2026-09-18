@@ -6,6 +6,10 @@ Pipeline local (VS Code / Jupyter) para pronóstico de demanda eléctrica por me
 
 Por cada medidor y variable (P/Q) se comparan **9 candidatos a 15 minutos** (el ranking que decide el pronóstico operativo): Ridge, RandomForest, XGBoost, LightGBM, CatBoost y MLP (selección de features por algoritmo genético + búsqueda bayesiana de hiperparámetros con Optuna, corrección de heterocedasticidad), más 3 benchmarks de persistencia estacional. Por separado, una comparación **exigida por el plan** corre SeasonalNaive, ARIMA, SARIMA, Holt-Winters, Prophet y LSTM, cada uno sobre el dataset a la resolución que necesita para rendir a su potencial (diaria para los clásicos y Prophet, horaria para LSTM) — no compiten por el pronóstico operativo, solo documentan la comparación contra esos benchmarks. Todos los modelos, en ambas comparaciones, pasan por la misma batería de métricas y diagnósticos estadísticos (RMSE/MAE/R², Durbin-Watson, Ljung-Box, Breusch-Pagan/White).
 
+## Figuras generadas
+
+Por cada medidor, la curva histórica (`curva_<medidor>.png`) y la de proyección (`proyeccion_<medidor>.png`) usan el mismo formato: un solo panel con P (azul), Q (verde) y S/KVA (morado, medido cuando el medidor lo trae o derivado como `hypot(P,Q)` para el pronóstico) superpuestos; en la de proyección, el tramo pronosticado continúa en línea punteada justo donde termina el histórico, sin salto visual. Además, cada uno de los 6 modelos ML (no solo el ganador) genera su propia figura por medidor/variable con su curva de convergencia/aprendizaje (error de validación por ronda de boosting en XGBoost/LightGBM/CatBoost, loss por iteración en MLP, o coeficientes/importancia de features en Ridge/RandomForest) junto a su panel de prueba real-vs-predicho.
+
 ## Estructura del proyecto
 
 ```
