@@ -895,6 +895,25 @@ def parte_4(nb) -> None:
                "(RUN/'RESUMEN.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False),encoding='utf-8')")
 
 
+def parte_5(nb) -> None:
+    """load_meter resolvía los duplicados agrupando las ~129 mil marcas de cada medidor con una
+    lambda de Python (~190 s por medidor, horas por ejecución); ahora solo agrupa las repetidas."""
+    i = celda_con(nb, "def load_meter(m):")
+    reemplazar(nb, i, "        df=df.groupby(level=0).agg(lambda v:v.dropna().iloc[0] if v.dropna().nunique()==1 else np.nan)",
+               "        df=resolver_duplicados(df)  # solo agrupa las marcas repetidas (idéntico al método anterior; ~190 s -> 0,1 s por medidor)")
+    reemplazar(nb, i, "def load_meter(m):", "from prodma.series import resolver_duplicados\ndef load_meter(m):")
+
+
+def parte_6(nb) -> None:
+    """Persistir el registro de eventos ya sin duplicados (si una reanudación no agrega eventos nuevos,
+    el archivo con duplicados de sesiones anteriores quedaba tal cual)."""
+    i = celda_con(nb, "sin duplicados de reanudaciones anteriores")
+    reemplazar(nb, i,
+               "    LOG=[e for k,e in enumerate(LOG) if e not in LOG[:k]]   # sin duplicados de reanudaciones anteriores\n",
+               "    LOG=[e for k,e in enumerate(LOG) if e not in LOG[:k]]   # sin duplicados de reanudaciones anteriores\n"
+               "    pd.DataFrame(LOG).to_csv(RUN/'logs/eventos.csv',index=False)  # persiste el registro ya depurado\n")
+
+
 def main() -> int:
     nb = nbformat.read(NOTEBOOK, as_version=4)
     fuentes = [c.source for c in nb.cells if c.cell_type == "code"]
@@ -910,6 +929,12 @@ def main() -> int:
         cambios = True
     if not any("sin duplicados de reanudaciones anteriores" in f for f in fuentes):
         parte_4(nb)
+        cambios = True
+    if not any("resolver_duplicados(df)" in f for f in fuentes):
+        parte_5(nb)
+        cambios = True
+    if not any("persiste el registro ya depurado" in f for f in fuentes):
+        parte_6(nb)
         cambios = True
     if not cambios:
         print("El notebook ya tiene los cambios del cierre 2027; no se modifica.")
