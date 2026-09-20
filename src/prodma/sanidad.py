@@ -13,26 +13,80 @@ import pandas as pd
 PASOS_ANIO = 96 * 365
 
 
+def _claves(index: pd.DatetimeIndex) -> pd.DataFrame:
+    return pd.DataFrame({"mes": index.month, "dow": index.dayofweek, "bloque": index.hour * 4 + index.minute // 15})
+
+
+def _mapear(tabla: pd.Series, reserva: pd.Series, mediana_global: float, index: pd.DatetimeIndex) -> np.ndarray:
+    """Valor de ``tabla`` (mes, dow, bloque) para cada timestamp; reserva (dow, bloque); mediana global."""
+    claves = _claves(index)
+    out = pd.Series(pd.MultiIndex.from_frame(claves).map(tabla), index=index)
+    faltan = out.isna()
+    if faltan.any():
+        fb = pd.MultiIndex.from_frame(claves.loc[faltan.values, ["dow", "bloque"]]).map(reserva)
+        out.loc[faltan] = np.where(pd.notna(fb), fb, mediana_global)
+    return out.to_numpy(dtype=float)
+
+
 def calendar_profile(s: pd.Series, index: pd.DatetimeIndex) -> np.ndarray:
     """Perfil (mes, día de semana, bloque de 15 min) por mediana de los últimos 366 días.
 
     Vectorizado; con reserva (día de semana, bloque) y mediana global cuando el mes no está
-    en la ventana. Equivale a mapear punto a punto (verificado en la sección 22).
+    en la ventana. Equivale a mapear punto a punto (verificado en la sección 22). No corrige
+    cambios de nivel: si la demanda creció respecto al año anterior, subestima.
     """
     train = s.dropna().tail(366 * 96)
-    key_full = pd.DataFrame({"mes": train.index.month, "dow": train.index.dayofweek,
-                             "bloque": train.index.hour * 4 + train.index.minute // 15, "v": train.to_numpy()})
-    tab = key_full.groupby(["mes", "dow", "bloque"])["v"].median()
-    fallback = key_full.groupby(["dow", "bloque"])["v"].median()
-    global_median = train.median()
-    idx_keys = pd.DataFrame({"mes": index.month, "dow": index.dayofweek,
-                             "bloque": index.hour * 4 + index.minute // 15})
-    out = pd.Series(pd.MultiIndex.from_frame(idx_keys).map(tab), index=index)
-    missing = out.isna()
-    if missing.any():
-        fb_vals = pd.MultiIndex.from_frame(idx_keys.loc[missing.values, ["dow", "bloque"]]).map(fallback)
-        out.loc[missing] = np.where(pd.notna(fb_vals), fb_vals, global_median)
-    return out.to_numpy(dtype=float)
+    k = _claves(train.index)
+    k["v"] = train.to_numpy()
+    tab = k.groupby(["mes", "dow", "bloque"])["v"].median()
+    reserva = k.groupby(["dow", "bloque"])["v"].median()
+    return _mapear(tab, reserva, train.median(), index)
+
+
+def perfil_anclado(s: pd.Series, index: pd.DatetimeIndex, dias_nivel: int = 90,
+                   ventana_tendencia: int = 365) -> np.ndarray:
+    """Forma estacional (mes, día de semana, bloque) x nivel reciente desestacionalizado.
+
+    Sin entrenamiento. Separa la tendencia (media móvil centrada de ``ventana_tendencia``
+    días) de la estacionalidad usando TODO el historial disponible, y ancla el nivel a los
+    últimos ``dias_nivel`` días una vez quitada la estacionalidad. A diferencia de
+    ``calendar_profile`` (mediana de los últimos 12 meses, que arrastra el nivel del año
+    anterior) no subestima cuando la demanda creció, ni sobreestima cuando cayó.
+    Multiplicativo si la serie es positiva; aditivo si tiene valores negativos (p. ej. Q).
+    Con menos de ``ventana_tendencia`` + 60 días de historia no se puede separar tendencia de
+    estacionalidad y se devuelve ``calendar_profile``.
+    """
+    s = s.dropna()
+    if len(s) < 96 * (ventana_tendencia + 60):
+        return calendar_profile(s, index)
+    multiplicativo = bool((s > 0).mean() > 0.99 and s.mean() > 0)
+    nivel = s.rolling(96 * ventana_tendencia, min_periods=96 * ventana_tendencia // 2, center=True).mean()
+    forma_obs = (s / nivel) if multiplicativo else (s - nivel)
+    margen = 96 * (ventana_tendencia // 2)  # solo filas con ventana centrada completa (sin sesgo en los extremos)
+    forma_obs = forma_obs.iloc[margen:len(forma_obs) - margen].replace([np.inf, -np.inf], np.nan).dropna()
+    if len(forma_obs) < 96 * 90:
+        return calendar_profile(s, index)
+    k = _claves(forma_obs.index)
+    k["v"] = forma_obs.to_numpy()
+    tab = k.groupby(["mes", "dow", "bloque"])["v"].median()
+    reserva = k.groupby(["dow", "bloque"])["v"].median()
+    glob = float(forma_obs.median())
+    reciente = s.tail(96 * dias_nivel)
+    forma_rec = _mapear(tab, reserva, glob, reciente.index)
+    forma_fut = _mapear(tab, reserva, glob, index)
+    if multiplicativo:
+        resultado = float(reciente.mean()) / float(np.mean(forma_rec)) * forma_fut
+    else:
+        resultado = float(reciente.mean()) - float(np.mean(forma_rec)) + forma_fut
+    # Tope de seguridad: en series casi nulas o a ráfagas el cociente forma/nivel se dispara.
+    # Si el nivel anclado se aparta demasiado del perfil simple, no se confía en el ajuste.
+    plano = calendar_profile(s, index)
+    if multiplicativo:
+        razon = float(np.mean(resultado)) / float(np.mean(plano)) if np.mean(plano) > 0 else np.nan
+        confiable = bool(np.isfinite(razon) and 0.4 <= razon <= 2.5)
+    else:
+        confiable = bool(abs(np.mean(resultado) - np.mean(plano)) <= 3 * max(float(s.tail(PASOS_ANIO).std()), 1e-9))
+    return resultado if confiable else plano
 
 
 def evaluar_sanidad(pred: pd.Series, historia: pd.Series, umbral: float = 0.25,

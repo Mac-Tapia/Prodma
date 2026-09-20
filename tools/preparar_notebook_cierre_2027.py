@@ -408,11 +408,8 @@ MD_SEC21 = """## 21 · Backtesting multistep
 Prueba recursiva sin reentrenar (modelo guardado) sobre los últimos `test_days`+1 días del tramo de prueba, con horizontes `CFG['backtest_horizontes']` (96 = 1 día, 672 = 1 semana). Se registra por separado del error rolling de un paso; `fuera_de_muestra` indica si la ventana quedó fuera del entrenamiento."""
 
 
-def main() -> int:
-    nb = nbformat.read(NOTEBOOK, as_version=4)
-    if any("prodma.reanudar" in c.source for c in nb.cells if c.cell_type == "code"):
-        print("El notebook ya tiene los cambios del cierre 2027; no se modifica.")
-        return 0
+def parte_1(nb) -> None:
+    """Reanudación, horizonte 2027, pronóstico rápido, sanidad, backtest y verificación."""
 
     # 1) CFG: horizonte a fin de 2027 y parámetros de la reanudación
     i = celda_con(nb, "CFG = dict(")
@@ -545,6 +542,357 @@ def main() -> int:
         "MEDIDORES_ADICIONALES=_con_datos[:CFG['max_medidores_adicionales']] if CFG.get('max_medidores_adicionales') else _con_datos\n"
         "if MEDIDORES_ADICIONALES:\n    for medidor in MEDIDORES_ADICIONALES:")
 
+
+
+MARCA_PARTE_2 = "# (reanudación) figura ya generada"
+
+
+def parte_2(nb) -> None:
+    """Al reanudar, no regenerar lo pesado que ya está en la carpeta de la corrida (figuras de las
+    secciones 9-10, ~30 s c/u, y el Excel de la matriz consolidada, 146 MB)."""
+    bucle_curvas = "for _i,m in enumerate(MEDIDORES,1):\n    print(f'Figura: {m} ({_i}/{len(MEDIDORES)})',flush=True)"
+    i = celda_con(nb, bucle_curvas)
+    reemplazar(nb, i, bucle_curvas,
+               "for _i,m in enumerate(MEDIDORES,1):\n"
+               "    if REANUDANDO and (RUN/f'figuras/curva_{TOKENS[m]}.png').exists(): continue  " + MARCA_PARTE_2 + "\n"
+               "    print(f'Figura: {m} ({_i}/{len(MEDIDORES)})',flush=True)")
+    export_xlsx = "if CFG['exportar_excel']:\n    assert len(matrix)<1048576 and len(matrix.columns)<16384\n    matrix.to_excel("
+    reemplazar(nb, i, export_xlsx,
+               "if CFG['exportar_excel'] and not (REANUDANDO and (RUN/'tablas/Matriz_Consolidada.xlsx').exists()):\n"
+               "    assert len(matrix)<1048576 and len(matrix.columns)<16384\n    matrix.to_excel(")
+    bucle_limpio = "    for var in variables_out:\n        n_rec=int(out[var+'_recortado'].sum())"
+    i = celda_con(nb, bucle_limpio)
+    reemplazar(nb, i, bucle_limpio,
+               "    for var in variables_out:\n"
+               "        if REANUDANDO and (RUN/f'figuras/limpio_{TOKENS[m]}_{var}.png').exists(): continue  " + MARCA_PARTE_2 + "\n"
+               "        n_rec=int(out[var+'_recortado'].sum())")
+
+
+CELDA_PRONOSTICO_V2 = r'''import matplotlib
+from prodma.recursivo import (features_calendario,proyectar_series,proyectar_recursivo,
+    preparar_para_inferencia,cargar_modelo,es_columna_dinamica,BUFFER_MINIMO)
+from prodma.sanidad import evaluar_sanidad,calendar_profile,perfil_anclado
+from prodma.reanudar import clasificar_serie,ESTADO_OK,ESTADO_CONSTANTE,ESTADO_SIN_DATOS
+BUFFER_HISTORIA=BUFFER_MINIMO+96   # 4 semanas + 1 día: alcance máximo de las features dinámicas
+FIN_PLAN=pd.Timestamp(CFG['fin_plan'])
+H_SEL=max(CFG['backtest_horizontes'])   # horizonte (pasos de 15 min) con el que se elige el método de cada serie
+FORECASTS={};MENSUAL={};SANIDAD=[]
+
+# --- Estado de cada serie: solo las ACTIVAS entran a la elección de método. Las constantes se
+# proyectan como constante declarada y las que dejaron de reportar NO se proyectan (proyectar
+# años sobre un medidor apagado sería inventar demanda). ---
+_ref_ultimo=max(w['last'] for w in WINNERS.values())
+for (m,var),w in WINNERS.items():
+    if 'estado' not in w: w['estado'],w['motivo']=clasificar_serie(w['cv_rmse'],w['last'],_ref_ultimo,CFG['max_dias_sin_datos'])
+    if not w.get('ruta_modelo'): w['ruta_modelo']=str(RUN/'modelos'/f"{TOKENS[m]}_{var}_{w['name']}.joblib")
+ACTIVAS=[k for k,w in WINNERS.items() if w['estado']==ESTADO_OK]
+CONSTANTES=[k for k,w in WINNERS.items() if w['estado']==ESTADO_CONSTANTE]
+SIN_DATOS=[k for k,w in WINNERS.items() if w['estado']==ESTADO_SIN_DATOS]
+for k in SIN_DATOS: log('pronostico',f'{k[0]}/{k[1]}',ESTADO_SIN_DATOS,WINNERS[k]['motivo'])
+for k in CONSTANTES: log('pronostico',f'{k[0]}/{k[1]}',ESTADO_CONSTANTE,'Se proyecta la mediana de los últimos 30 días (sin ML)')
+print(f'Series: {len(ACTIVAS)} activas, {len(CONSTANTES)} constantes, {len(SIN_DATOS)} sin datos recientes (no se proyectan)')
+
+def historia_recursion(m,var,hasta):
+    hist,_=causal_fill(load_meter(m)[var].loc[:hasta]);return hist
+def _perfiles(hist,idx):
+    return {'PERFIL_ANCLADO':perfil_anclado(hist,idx),'PERFIL_CALENDARIO':calendar_profile(hist,idx)}
+_desde_global=min(WINNERS[k]['last'] for k in ACTIVAS+CONSTANTES)+pd.Timedelta(minutes=15)
+# Calendario/exógenas de TODO el horizonte, vectorizado y una sola vez (no dependen de la recursión).
+CAL_GLOBAL=features_calendario(pd.date_range(_desde_global,FIN_PLAN,freq='15min',name='Fecha'),
+    FERIADOS,CLIMATOLOGIA_TEMPERATURA,PBI_MENSUAL,POBLACION_ANUAL)
+
+# --- Validación en vivo contra features() del notebook: el calendario vectorizado y la
+# recursión rápida deben reproducir EXACTAMENTE lo que daría features() paso a paso. ---
+_k0=next((k for k in ACTIVAS if WINNERS[k]['name'] in ('Ridge','LightGBM','XGBoost','CatBoost')),ACTIVAS[0])
+_w0=WINNERS[_k0];_hist0=historia_recursion(*_k0,_w0['last'])
+_Xref=features(load_meter(_k0[0])[_k0[1]].tail(4000))
+_cal_ref=features_calendario(_Xref.index,FERIADOS,CLIMATOLOGIA_TEMPERATURA,PBI_MENSUAL,POBLACION_ANUAL)
+for _c in _cal_ref.columns:
+    assert np.allclose(_cal_ref[_c].to_numpy(float),_Xref[_c].to_numpy(float),atol=1e-9,equal_nan=True),f'calendario difiere de features(): {_c}'
+_m0=cargar_modelo(_w0['ruta_modelo']);preparar_para_inferencia(_m0)
+_idx0=pd.date_range(_w0['last']+pd.Timedelta(minutes=15),periods=24,freq='15min')
+_s=_hist0.tail(BUFFER_HISTORIA).copy();_ref=[]
+for _t in _idx0:
+    _s.loc[_t]=np.nan;_v=float(_m0.predict(features(_s).loc[[_t],_w0['columns']])[0]);_s.loc[_t]=_v;_ref.append(_v);_s=_s.tail(BUFFER_HISTORIA)
+_rap=proyectar_recursivo(_m0,_hist0.to_numpy()[-BUFFER_HISTORIA:],_w0['columns'],CAL_GLOBAL.loc[_idx0[0]:_idx0[-1]])
+assert np.allclose(_ref,_rap,rtol=1e-6,atol=1e-6),'La recursión rápida no reproduce features() del notebook'
+print(f'Validación: calendario y recursión rápida reproducen features() ({_k0[0]}/{_k0[1]}, {_w0["name"]}, diferencia máx. {np.abs(np.array(_ref)-_rap).max():.2e})')
+del _m0,_Xref,_cal_ref,_s
+
+# --- Backtest multi-paso SIN reentrenar y elección del método de cada serie -----------------------
+# El pronóstico recursivo de un modelo entrenado a 1 paso pierde el nivel en pocos días (la
+# recursión converge a un punto fijo); el R² a 1 paso no lo revela. Por eso el método de cada
+# serie se elige por su error a H_SEL pasos (28 días) sobre los últimos test_days+1 días del tramo
+# de prueba, que el modelo guardado nunca vio: ML recursivo, perfil calendario (mediana de 12
+# meses) o perfil anclado (forma estacional x nivel reciente). El ML solo gana si mejora al mejor
+# perfil en más de (1-margen_ml). SEMANAL (repetir la última semana) es solo referencia.
+def _tareas_backtest():
+    for k in ACTIVAS:
+        m,var=k;w=WINNERS[k];cut=w['last']-pd.Timedelta(days=CFG['test_days']+1)
+        idx=pd.date_range(cut+pd.Timedelta(minutes=15),periods=H_SEL,freq='15min',name='Fecha')
+        cols_cal=[c for c in w['columns'] if not es_columna_dinamica(c)]
+        cal=features_calendario(idx,FERIADOS,CLIMATOLOGIA_TEMPERATURA,PBI_MENSUAL,POBLACION_ANUAL)
+        yield dict(clave=k,ruta_modelo=w['ruta_modelo'],columnas=w['columns'],
+                   historia=historia_recursion(m,var,cut).to_numpy()[-BUFFER_HISTORIA:],
+                   calendario_columnas=cols_cal,calendario_valores=cal[cols_cal].to_numpy(float),indice_futuro=idx)
+_ruta_bt,_ruta_sel=RUN/'tablas/backtest_recursivo.csv',RUN/'tablas/seleccion_metodo.csv'
+if CFG.get('reanudar_run') and _ruta_bt.exists() and _ruta_sel.exists() and 'metodo' in pd.read_csv(_ruta_bt,nrows=1).columns:
+    BT_DF=pd.read_csv(_ruta_bt);SELECCION=pd.read_csv(_ruta_sel);print('Backtest y selección de método recuperados de la corrida previa')
+else:
+    _ml_bt={}
+    for k,pred,seg,error in proyectar_series(_tareas_backtest(),n_jobs=CFG['workers_pronostico']):
+        if error: log('backtest',f'{k[0]}/{k[1]}','ERROR',error)
+        else: _ml_bt[k]=pred
+    print(f'Backtest ML: {len(_ml_bt)}/{len(ACTIVAS)} series')
+    BT=[];SEL=[]
+    for k in ACTIVAS:
+        m,var=k;w=WINNERS[k];cut=w['last']-pd.Timedelta(days=CFG['test_days']+1)
+        idx=pd.date_range(cut+pd.Timedelta(minutes=15),periods=H_SEL,freq='15min')
+        hist_bt=historia_recursion(m,var,cut);real=load_meter(m)[var].reindex(idx).to_numpy()
+        cand=_perfiles(hist_bt,idx);cand['SEMANAL']=np.resize(hist_bt.tail(672).to_numpy(),H_SEL)
+        if k in _ml_bt: cand['ML']=_ml_bt[k]
+        fuera=bool(idx[0]>=w['test_inicio']) if w.get('test_inicio') is not None else None
+        std_real=float(np.nanstd(real));fila=dict(medidor=m,variable=var,modelo_ml=w['name'],fuera_de_muestra=fuera,std_real=std_real)
+        for nombre,p in cand.items():
+            for h in CFG['backtest_horizontes']:
+                BT.append(dict(medidor=m,variable=var,modelo_ml=w['name'],metodo=nombre,horizonte=h,fuera_de_muestra=fuera,
+                               std_real=std_real,**metrics(real[:h],p[:h])))
+            e=real-p;ok=np.isfinite(e)   # banda empírica (5%-95%) del error a H_SEL pasos: exploratoria
+            if ok.sum()>=96: fila[f'lo_{nombre}'],fila[f'hi_{nombre}']=np.quantile(e[ok],[.05,.95])
+            fila[f'rmse_{nombre}']=metrics(real,p)['RMSE']
+        perfiles={n:fila.get(f'rmse_{n}',np.nan) for n in ('PERFIL_ANCLADO','PERFIL_CALENDARIO')}
+        mejor_perfil=min(perfiles,key=lambda n:(np.isnan(perfiles[n]),perfiles[n]));rml=fila.get('rmse_ML',np.nan)
+        fila['mejor_perfil']=mejor_perfil
+        fila['metodo']='ML' if (np.isfinite(rml) and np.isfinite(perfiles[mejor_perfil]) and rml<CFG['margen_ml']*perfiles[mejor_perfil]) else mejor_perfil
+        SEL.append(fila)
+    BT_DF=pd.DataFrame(BT);SELECCION=pd.DataFrame(SEL)
+    BT_DF.to_csv(_ruta_bt,index=False);SELECCION.to_csv(_ruta_sel,index=False)
+SEL_IDX={(r['medidor'],r['variable']):r for r in SELECCION.to_dict('records')}
+print('Método elegido por serie:',SELECCION.metodo.value_counts().to_dict())
+
+def _banda(k,metodo):
+    s=SEL_IDX[k];lo,hi=s.get(f'lo_{metodo}'),s.get(f'hi_{metodo}')
+    return (0.0 if pd.isna(lo) else float(lo)),(0.0 if pd.isna(hi) else float(hi))
+def construir_frame(k,pred_ml=None):
+    m,var=k;w=WINNERS[k];s=SEL_IDX[k];hist=historia_recursion(m,var,w['last'])
+    idx=pd.date_range(w['last']+pd.Timedelta(minutes=15),FIN_PLAN,freq='15min',name='Fecha')
+    perf=_perfiles(hist,idx);fuente=s['metodo'];fallback=''
+    if fuente=='ML':
+        san_ml=evaluar_sanidad(pd.Series(pred_ml,index=idx),hist,CFG['umbral_sanidad'])
+        if san_ml['estado']=='REVISAR':   # guarda de sanidad: nunca se recorta en silencio
+            fallback='ML descartado por sanidad ('+san_ml['marcas']+')';fuente=s['mejor_perfil']
+    final=np.asarray(pred_ml) if fuente=='ML' else perf[fuente]
+    san=evaluar_sanidad(pd.Series(final,index=idx),hist,CFG['umbral_sanidad']);lo,hi=_banda(k,fuente)
+    return pd.DataFrame({'Fecha':idx,'pred':final,'banda_inf_exploratoria':final+lo,'banda_sup_exploratoria':final+hi,
+        'pred_ml':np.asarray(pred_ml) if pred_ml is not None else np.nan,
+        'pred_perfil_anclado':perf['PERFIL_ANCLADO'],'pred_perfil_calendario':perf['PERFIL_CALENDARIO'],
+        'fuente':pd.Categorical([fuente]*len(idx)),'estado_sanidad':pd.Categorical([san['estado']]*len(idx)),
+        'marcas_sanidad':pd.Categorical([san['marcas']]*len(idx)),'fallback':pd.Categorical([fallback]*len(idx)),
+        'desvio_media':san['desvio_media'],'ratio_std':san['ratio_std']})
+def construir_frame_constante(k):
+    m,var=k;w=WINNERS[k];hist=historia_recursion(m,var,w['last'])
+    idx=pd.date_range(w['last']+pd.Timedelta(minutes=15),FIN_PLAN,freq='15min',name='Fecha')
+    c=np.full(len(idx),float(hist.tail(96*30).median()))
+    return pd.DataFrame({'Fecha':idx,'pred':c,'banda_inf_exploratoria':c,'banda_sup_exploratoria':c,'pred_ml':np.nan,
+        'pred_perfil_anclado':c,'pred_perfil_calendario':c,'fuente':pd.Categorical([ESTADO_CONSTANTE]*len(idx)),
+        'estado_sanidad':pd.Categorical(['NO_APLICA']*len(idx)),'marcas_sanidad':pd.Categorical(['']*len(idx)),
+        'fallback':pd.Categorical(['']*len(idx)),'desvio_media':np.nan,'ratio_std':np.nan})
+
+def registrar_proyeccion(k,frame):
+    m,var=k;w=WINNERS[k];hist=historia_recursion(m,var,w['last']);FORECASTS[k]=frame
+    SANIDAD.append(dict(medidor=m,variable=var,modelo_ml=w['name'],fuente=str(frame['fuente'].iloc[0]),
+        estado=str(frame['estado_sanidad'].iloc[0]),marcas=str(frame['marcas_sanidad'].iloc[0]),
+        fallback=str(frame['fallback'].iloc[0]),desvio_media=frame['desvio_media'].iloc[0],ratio_std=frame['ratio_std'].iloc[0]))
+    frame_por_fecha=frame.set_index('Fecha')
+    # Curva de proyección mensual: a resolución de 15 min un horizonte de años es
+    # ilegible: se promedia por mes para ver claramente EN QUÉ MESES crece o decrece
+    # la demanda proyectada, con el histórico reciente de contexto y la banda exploratoria.
+    try:
+        hist_mensual=hist.resample('MS').mean().tail(24)
+        pred_mensual=frame_por_fecha['pred'].resample('MS').mean()
+        banda_inf_mensual=frame_por_fecha['banda_inf_exploratoria'].resample('MS').mean()
+        banda_sup_mensual=frame_por_fecha['banda_sup_exploratoria'].resample('MS').mean()
+        # Se guarda para la figura COMBINADA por medidor (P+Q en un solo panel, mismo
+        # formato que curva_{medidor}.png), generada despues de este bucle una vez que
+        # ambas variables del medidor ya tienen su pronostico mensual calculado.
+        MENSUAL[k]=dict(hist=hist_mensual,pred=pred_mensual,
+            banda_inf=banda_inf_mensual,banda_sup=banda_sup_mensual,last=w['last'])
+        # Variación mensual (%): identifica directamente los meses donde la demanda proyectada
+        # CRECE (verde) frente a los meses donde, en parte, se consume MENOS que el mes previo
+        # (rojo) -- y por construcción es consistente con la curva de arriba, no otra fuente.
+        crecimiento=pred_mensual.pct_change()*100
+        fig,ax=plt.subplots(figsize=(14,3))
+        ax.bar(crecimiento.index,crecimiento.values,width=20,
+               color=['tab:green' if v>=0 else 'tab:red' for v in crecimiento.fillna(0).values])
+        ax.axhline(0,color='black',lw=.8)
+        ax.set_ylabel('% cambio mensual');ax.set_title(f'{m} — {var}: variación mensual proyectada (verde=crece, rojo=decrece)')
+        fig.tight_layout();fig.savefig(RUN/f'figuras/crecimiento_{TOKENS[m]}_{var}.png',dpi=120);plt.close(fig)
+    except Exception as exc: log('figura_proyeccion',f'{m}/{var}','ERROR',exc)
+    # Un archivo por año calendario; por la convención de fin de intervalo (celda 12) el
+    # timestamp 00:00 del 1-ene pertenece al año que termina.
+    for year in range(w['last'].year,FIN_PLAN.year+1):
+        chunk=frame_por_fecha.loc[(frame_por_fecha.index>pd.Timestamp(year,1,1))&(frame_por_fecha.index<=pd.Timestamp(year+1,1,1))]
+        if chunk.empty:continue
+        chunk.reset_index().to_parquet(RUN/'pronosticos'/f'operativo_{TOKENS[m]}_{var}_{year}.parquet',index=False)
+        if CFG['exportar_excel']:chunk[['pred','banda_inf_exploratoria','banda_sup_exploratoria']].reset_index().to_excel(
+            RUN/'pronosticos'/f'operativo_{TOKENS[m]}_{var}_{year}.xlsx',engine='xlsxwriter')
+
+def _ruta_serie(k): return RUN/'pronosticos'/f'serie_{TOKENS[k[0]]}_{k[1]}.parquet'
+def _guardar_serie(k,frame): frame.to_parquet(_ruta_serie(k),index=False)
+_pendientes_ml=[]
+for k in ACTIVAS+CONSTANTES:
+    # Checkpoint por serie: al reanudar, lo ya proyectado no se recalcula (borre pronosticos/serie_*.parquet
+    # si cambia la lógica de proyección).
+    if CFG.get('reanudar_run') and _ruta_serie(k).exists(): registrar_proyeccion(k,pd.read_parquet(_ruta_serie(k)))
+    elif k in CONSTANTES:
+        frame=construir_frame_constante(k);_guardar_serie(k,frame);registrar_proyeccion(k,frame)
+    elif SEL_IDX[k]['metodo']=='ML': _pendientes_ml.append(k)   # el ML solo se proyecta a 2027 donde ganó el backtest
+    else:
+        frame=construir_frame(k);_guardar_serie(k,frame);registrar_proyeccion(k,frame)
+print(f'{len(FORECASTS)} series proyectadas (perfiles/checkpoints/constantes); {len(_pendientes_ml)} por proyectar con ML ({CFG["workers_pronostico"]} procesos)')
+
+def _tareas():
+    for k in _pendientes_ml:
+        m,var=k;w=WINNERS[k];hist=historia_recursion(m,var,w['last'])
+        idx=pd.date_range(w['last']+pd.Timedelta(minutes=15),FIN_PLAN,freq='15min',name='Fecha')
+        cols_cal=[c for c in w['columns'] if not es_columna_dinamica(c)]
+        yield dict(clave=k,ruta_modelo=w['ruta_modelo'],columnas=w['columns'],historia=hist.to_numpy()[-BUFFER_HISTORIA:],
+                   calendario_columnas=cols_cal,calendario_valores=CAL_GLOBAL.loc[idx[0]:idx[-1],cols_cal].to_numpy(float),
+                   indice_futuro=idx)
+_t0=time.time();_hechas=0
+for k,pred,seg,error in proyectar_series(_tareas(),n_jobs=CFG['workers_pronostico']):
+    _hechas+=1
+    try:
+        if error:   # el ML falló para esta serie: se usa el mejor perfil y queda registrado
+            log('pronostico',f'{k[0]}/{k[1]}','ADVERTENCIA','ML falló ('+error+'); se usa '+SEL_IDX[k]['mejor_perfil'])
+            SEL_IDX[k]['metodo']=SEL_IDX[k]['mejor_perfil'];frame=construir_frame(k)
+        else: frame=construir_frame(k,pred)
+        _guardar_serie(k,frame);registrar_proyeccion(k,frame)
+        print(f'[{_hechas}/{len(_pendientes_ml)}] {k[0]}/{k[1]}: {len(frame)} pasos, fuente {frame["fuente"].iloc[0]} '
+              f'({WINNERS[k]["name"]}, {seg:.0f} s); transcurrido {(time.time()-_t0)/60:.1f} min',flush=True)
+    except Exception as exc: log('pronostico',f'{k[0]}/{k[1]}','ERROR',exc);print(f'{k}: ERROR {exc}',flush=True)
+
+SANIDAD_DF=pd.DataFrame(SANIDAD);SANIDAD_DF.to_csv(RUN/'tablas/sanidad_proyecciones.csv',index=False)
+_estado_proy=pd.DataFrame([dict(medidor=m,variable=v,modelo_ml=w['name'],estado_serie=w['estado'],motivo=w['motivo'],
+    proyectada=(m,v) in FORECASTS,fuente=str(FORECASTS[(m,v)]['fuente'].iloc[0]) if (m,v) in FORECASTS else '')
+    for (m,v),w in WINNERS.items()])
+_estado_proy.to_csv(RUN/'tablas/estado_proyeccion.csv',index=False)
+print(f'Proyecciones: {len(FORECASTS)} series; fuente: {_estado_proy.fuente.value_counts().to_dict()}; '
+      f'sanidad REVISAR: {(SANIDAD_DF.estado=="REVISAR").sum() if len(SANIDAD_DF) else 0}')
+
+# Curva de PROYECCION combinada por medidor: mismo formato que curva_{medidor}.png
+# (panel unico, P=azul/Q=verde/S=morado superpuestos) -- el tramo observado en linea
+# solida continua DIRECTAMENTE en linea punteada del mismo color para el pronostico,
+# con una linea vertical marcando el ultimo dato observado. No existe un modelo ML
+# que pronostique S directamente (solo P y Q se entrenan); S se DERIVA igual que
+# S_calculada en la limpieza historica (celda 10): S=hypot(P,Q). Para el tramo
+# observado se usa S_medida real cuando el medidor la trae (mismo dato que curva_);
+# para el pronostico, unicamente hypot(P_pred,Q_pred), porque no existe S medida futura.
+COLOR_VARIABLE={'P':'tab:blue','Q':'tab:green','S_medida':'tab:purple'}
+ETIQUETA_VARIABLE={'P':'P','Q':'Q','S_medida':'S'}
+_backend_prev=matplotlib.get_backend();plt.switch_backend('Agg')
+for m in MEDIDORES:
+    disponibles=[var for var in ('P','Q','S_medida') if (m,var) in MENSUAL]
+    if not disponibles: continue
+    try:
+        fig,ax=plt.subplots(figsize=(14,5))
+        for var in disponibles:
+            bloque=MENSUAL[(m,var)];color=COLOR_VARIABLE[var];etiqueta=ETIQUETA_VARIABLE[var]
+            bloque['hist'].plot(ax=ax,color=color,lw=1.3,label=f'{etiqueta} observado (prom. mensual)')
+            bloque['pred'].plot(ax=ax,color=color,lw=1.3,ls='--',label=f'{etiqueta} proyección (prom. mensual, {FORECASTS[(m,var)]["fuente"].iloc[0]})')
+            ax.fill_between(bloque['pred'].index,bloque['banda_inf'],bloque['banda_sup'],color=color,alpha=.12)
+        # Respaldo SOLO si el medidor no tiene KVA real entrenado (5/50): se sigue
+        # derivando S=hypot(P,Q) para no perder la 3ra curva en esos casos.
+        if 'S_medida' not in disponibles and 'P' in disponibles and 'Q' in disponibles:
+            bp,bq=MENSUAL[(m,'P')],MENSUAL[(m,'Q')]
+            d_m=load_meter(m)
+            s_medida_mensual=(d_m['S_medida'].resample('MS').mean().tail(24)
+                if 'S_medida' in d_m.columns and d_m['S_medida'].notna().any() else None)
+            hist_S=s_medida_mensual if s_medida_mensual is not None else np.hypot(bp['hist'],bq['hist'])
+            pred_S=pd.Series(np.hypot(bp['pred'],bq['pred']),index=bp['pred'].index)
+            etiqueta_hist_s='S medido' if s_medida_mensual is not None else 'S calculado (hypot P,Q)'
+            hist_S.plot(ax=ax,color='tab:purple',lw=1.3,label=f'{etiqueta_hist_s} (prom. mensual)')
+            pred_S.plot(ax=ax,color='tab:purple',lw=1.3,ls='--',label='S proyección (derivado hypot P,Q -- sin KVA real, prom. mensual)')
+        ultimo_observado=max(MENSUAL[(m,var)]['last'] for var in disponibles)
+        ax.axvline(ultimo_observado,color='gray',ls=':',lw=.8)
+        ax.set_ylabel('Potencia (kW / kvar / kVA)')
+        ax.set_title(f'{m} — proyección mensual hasta {FIN_PLAN.date()} ({"/".join(ETIQUETA_VARIABLE[v] for v in disponibles)} continuando desde el último dato observado)')
+        ax.legend(loc='upper left',fontsize=8)
+        fig.tight_layout();fig.savefig(RUN/f'figuras/proyeccion_{TOKENS[m]}.png',dpi=120);plt.close(fig)
+    except Exception as exc: log('figura_proyeccion_medidor',m,'ERROR',exc)
+plt.close('all');plt.switch_backend(_backend_prev)
+'''
+
+CELDA_BACKTEST_V2 = r'''# Resumen del backtest multi-paso (calculado en la sección 20, donde se usa para elegir el método de
+# cada serie). RMSE relativo = RMSE / desvío estándar real de la ventana: 1.0 equivale a no saber nada
+# más que la media; menor es mejor. Sin reentrenar: el modelo guardado nunca vio esos días
+# (`fuera_de_muestra` lo indica por serie).
+_bt=BT_DF.copy();_bt['rmse_rel']=_bt.RMSE/_bt.std_real.replace(0,np.nan)
+print('RMSE relativo al desvío real (mediana entre series) por horizonte (pasos de 15 min) y método:')
+print(_bt.pivot_table(index='horizonte',columns='metodo',values='rmse_rel',aggfunc='median').round(3).to_string())
+_h=_bt[_bt.horizonte==H_SEL].pivot_table(index=['medidor','variable'],columns='metodo',values='RMSE')
+print(f'\nVictorias por método a {H_SEL} pasos entre ML/PERFIL_ANCLADO/PERFIL_CALENDARIO:',
+      _h[[c for c in ('ML','PERFIL_ANCLADO','PERFIL_CALENDARIO') if c in _h]].idxmin(axis=1).value_counts().to_dict())
+print('Método elegido por serie (el ML solo si mejora al mejor perfil en más de',f"{1-CFG['margen_ml']:.0%}):",SELECCION.metodo.value_counts().to_dict())
+if 'fuera_de_muestra' in SELECCION: print('Series con la ventana de backtest fuera del entrenamiento:',int(SELECCION.fuera_de_muestra.fillna(False).sum()),'de',len(SELECCION))
+'''
+
+MD_SEC20_V2 = """## 20 · Proyección operativa hasta el cierre del horizonte
+
+Aplica a P, Q y -- para los medidores con KVA real -- también a S_medida. **Sin reentrenar**: se usan los modelos guardados (entrenados con el 80% cronológico del histórico). El pronóstico recursivo de un modelo entrenado a 1 paso **pierde el nivel en pocos días** (la recursión converge a un punto fijo; el R² a 1 paso no lo revela), así que el método de cada serie se **elige por backtest a 28 días** sobre datos que el modelo no vio: ML recursivo, perfil calendario (mediana de 12 meses) o perfil anclado (forma estacional × nivel reciente desestacionalizado). El ML solo se usa donde mejora al mejor perfil en más de `1-CFG['margen_ml']` y, además, pasa las guardas de sanidad (media proyectada frente a los últimos 12 meses, aplanamiento, rango); si no, se usa el mejor perfil y queda registrado. Cada serie deja `fuente`, `pred_ml`, `pred_perfil_anclado` y `pred_perfil_calendario` en `pronosticos/serie_*.parquet`. Las series sin datos recientes no se proyectan y las constantes se proyectan como constante declarada. El cálculo recursivo usa `prodma.recursivo` (calendario vectorizado + numpy, validado en vivo contra `features()`), un proceso por serie y un checkpoint por serie. Las bandas son empíricas del backtest a 28 días y exploratorias: no hay validación a 16 meses. Por cada medidor/variable se grafica la curva mensual y la variación mensual (%)."""
+
+MD_SEC21_V2 = """## 21 · Backtesting multistep
+
+Resumen del backtest recursivo **sin reentrenar** (se calcula en la sección 20 para poder elegir el método de cada serie): últimos `test_days`+1 días del tramo de prueba, horizontes `CFG['backtest_horizontes']` (96 = 1 día, 672 = 1 semana, 2688 = 28 días), para el ML y para los perfiles. Se registra por separado del error rolling de un paso; `fuera_de_muestra` indica si la ventana quedó fuera del entrenamiento."""
+
+
+def parte_3(nb) -> None:
+    """La recursión ML pierde el nivel en pocos días: el método de cada serie se elige por backtest
+    (ML / perfil anclado / perfil calendario) en vez de asumir que el ML sirve a 16 meses."""
+    i = celda_con(nb, "backtest_horizontes=(96,672), max_medidores_adicionales=None)")
+    reemplazar(nb, i, "backtest_horizontes=(96,672), max_medidores_adicionales=None)",
+               "backtest_horizontes=(96,672,2688),  # el mayor decide el método de cada serie\n"
+               "           margen_ml=0.95,           # el ML solo se usa si su RMSE a 28 días es < margen x el del mejor perfil\n"
+               "           max_medidores_adicionales=None)")
+    i = celda_con(nb, "def construir_frame(k,pred_ml):")
+    nb.cells[i].source = CELDA_PRONOSTICO_V2
+    i = celda_con(nb, "BACKTEST=[];H_MAX=max(CFG['backtest_horizontes'])")
+    nb.cells[i].source = CELDA_BACKTEST_V2
+    i = celda_con(nb, "## 20 · Pronóstico recursivo operativo", "markdown")
+    nb.cells[i].source = MD_SEC20_V2
+    i = celda_con(nb, "## 21 · Backtesting multistep", "markdown")
+    nb.cells[i].source = MD_SEC21_V2
+    i = celda_con(nb, "limitaciones+= ['Pronóstico operativo hasta el cierre de '")
+    fuente = nb.cells[i].source
+    a = fuente.index("limitaciones+= [")
+    b = fuente.index("# Cierre de los criterios mínimos de aceptación estadística")
+    nb.cells[i].source = fuente[:a] + (
+        "limitaciones+= ['Proyección hasta el cierre de '+str(FIN_PLAN.year-1)+' con los modelos guardados (80% cronológico del histórico, sin reentrenar con el 100%). '\n"
+        "    'El pronóstico recursivo ML pierde el nivel en pocos días: el método de cada serie se eligió por backtest a 28 días (ML, perfil anclado o perfil calendario); '\n"
+        "    'no hay validación a 16 meses y ninguna proyección incluye crecimiento más allá del nivel reciente',\n"
+        "    f'{len(SIN_DATOS)} series sin datos recientes NO se proyectan y {len(CONSTANTES)} series constantes se proyectan como constante (ver estado_proyeccion.csv)',\n"
+        "    f'Método de proyección por serie (ver seleccion_metodo.csv y sanidad_proyecciones.csv): {SANIDAD_DF.fuente.value_counts().to_dict() if len(SANIDAD_DF) else {}}']\n") + fuente[b:]
+    reemplazar(nb, i, "    proyecciones_verificadas=f'{len(VERIF)-len(_incumplen)}/{len(VERIF)}',",
+               "    proyecciones_verificadas=f'{len(VERIF)-len(_incumplen)}/{len(VERIF)}',\n"
+               "    metodo_por_serie={e:int(n) for e,n in SANIDAD_DF.fuente.value_counts().items()} if len(SANIDAD_DF) else {},")
+
+
+def main() -> int:
+    nb = nbformat.read(NOTEBOOK, as_version=4)
+    fuentes = [c.source for c in nb.cells if c.cell_type == "code"]
+    cambios = False
+    if not any("prodma.reanudar" in f for f in fuentes):
+        parte_1(nb)
+        cambios = True
+    if not any(MARCA_PARTE_2 in f for f in fuentes):
+        parte_2(nb)
+        cambios = True
+    if not any("H_SEL=max(" in f for f in fuentes):
+        parte_3(nb)
+        cambios = True
+    if not cambios:
+        print("El notebook ya tiene los cambios del cierre 2027; no se modifica.")
+        return 0
     nbformat.validate(nb)
     nbformat.write(nb, NOTEBOOK)
     print("Notebook actualizado:", NOTEBOOK)

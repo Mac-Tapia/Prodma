@@ -157,6 +157,8 @@ def restaurar_estado(run_dir, *, cfg: dict, tokens: dict, load_meter: Callable, 
                                    RMSE_restaurado=rmse, dif_rel=dif))
         imprimir(f"Restaurado {m}/{var} ({n}/{len(grupos)}); {time.time() - inicio:.0f} s")
     validacion = pd.DataFrame(validacion)
+    # Se guarda ANTES de validar: si la restauración no es fiel, la tabla permite ver cuáles fallan.
+    validacion.to_csv(run_dir / "tablas" / "validacion_restauracion.csv", index=False)
     malas = validacion[(validacion.dif_rel > tolerancia_rel) | validacion.RMSE_restaurado.isna()]
     if len(malas):
         raise RestauracionInconsistente(

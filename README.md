@@ -23,7 +23,7 @@ Prodma/
 ├── tools/                # Scripts de mantenimiento (generar variables externas, actualizar el notebook)
 ├── tests/                # Pruebas (unit/integration)
 ├── docs/                 # Documentación y planes de implementación
-├── resultados/           # Salidas por ejecución (ejecucion_<fecha>/) — generadas, no versionadas
+├── resultados/           # Salidas por ejecución (<modo>-<backend>_<fecha>_<hora>/) — generadas, no versionadas
 ├── requirements.txt      # Dependencias CPU
 ├── requirements-gpu.txt  # Dependencias adicionales para entrenamiento con GPU (CUDA)
 └── .venv/                # Entorno virtual local (no versionado)
@@ -59,7 +59,7 @@ En VS Code, selecciona `.venv\Scripts\python.exe` como intérprete/kernel del no
 
 ## Ejecutar
 
-Abre `notebook/proyecciondemanda.ipynb` en VS Code con el kernel `.venv` y ejecuta las celdas en orden. Cada ejecución crea una carpeta independiente en `resultados/ejecucion_<fecha>_<hora>/` sin sobrescribir ejecuciones previas.
+Abre `notebook/proyecciondemanda.ipynb` en VS Code con el kernel `.venv` y ejecuta las celdas en orden. Cada ejecución crea una carpeta independiente en `resultados/<modo>-<backend>_<fecha>_<hora>/` (p. ej. `C-AUT_20260918_105110`) sin sobrescribir ejecuciones previas.
 
 Para correrlo **desde terminal**, de cero hasta tener los resultados listos para entregar, usa la CLI del proyecto (envuelve el notebook y lo ejecuta por fases, registrando su propio kernel automáticamente):
 
@@ -69,8 +69,18 @@ Para correrlo **desde terminal**, de cero hasta tener los resultados listos para
 .\.venv\Scripts\python.exe -m prodma.pipeline --modo rapido --backend auto
 ```
 
+### Reanudar una corrida sin reentrenar
+
+El entrenamiento completo tarda decenas de horas. Si la corrida se interrumpió después de entrenar, los modelos (`modelos/*.joblib`) y las métricas ya están en disco y se puede **continuar en la misma carpeta sin reentrenar**:
+
+```powershell
+.\.venv\Scripts\python.exe -m prodma.pipeline --reanudar resultados\C-AUT_20260918_105110 --timeout 43200
+```
+
+Restaura el estado desde los modelos guardados (validando que cada uno reproduzca su RMSE guardado), elige por backtest a 28 días el método de cada serie (ML recursivo, perfil calendario o perfil anclado: el ML recursivo pierde el nivel en pocos días), proyecta hasta `CFG['fin_plan']` (por defecto, el cierre de 2027) y completa figuras, matriz operativa y tablas para DIgSILENT. Las series sin datos recientes no se proyectan y las proyecciones ML pasan por guardas de sanidad. Detalle y limitaciones en el manual.
+
 Guía completa, con todas las fases y cómo interpretar los resultados, en [docs/MANUAL_EJECUCION.md](docs/MANUAL_EJECUCION.md).
 
 ## Estado de la modularización
 
-La lógica del notebook se está extrayendo progresivamente a módulos reutilizables en `src/prodma/`, con pruebas en `tests/`. El plan detallado (tareas, arquitectura objetivo y criterios de aceptación) está en [docs/superpowers/plans/2026-09-16-demanda-electro-dunas-gpu-local.md](docs/superpowers/plans/2026-09-16-demanda-electro-dunas-gpu-local.md).
+La lógica del notebook se está extrayendo progresivamente a módulos reutilizables en `src/prodma/`, con pruebas en `tests/`. Ya viven allí la reanudación (`reanudar.py`), el pronóstico recursivo rápido y paralelo (`recursivo.py`), las guardas de sanidad y el perfil calendario (`sanidad.py`), la transformación del target (`transformaciones.py`), la selección de features (`seleccion_features.py`) y las variables externas. El plan detallado (tareas, arquitectura objetivo y criterios de aceptación) está en [docs/superpowers/plans/2026-09-16-demanda-electro-dunas-gpu-local.md](docs/superpowers/plans/2026-09-16-demanda-electro-dunas-gpu-local.md).

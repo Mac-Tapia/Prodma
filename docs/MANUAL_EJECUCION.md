@@ -142,9 +142,17 @@ estadísticos, etc.) todavía se editan directamente en la **celda 5** del noteb
 | Clave | Qué controla | Valor por defecto |
 |---|---|---|
 | `CFG['max_medidores_rapido']` | cuántos medidores procesa el modo rápido | `2` |
-| `CFG['escenarios']` | diccionario de tasas de crecimiento para la planificación 2028-2036 (vacío = solo se calcula la base) | `{}` |
+| `CFG['fin_plan']` | fin del horizonte de pronóstico (fin de intervalo: `2028-01-01 00:00` = cierre de 2027) | `'2028-01-01 00:00'` |
+| `CFG['escenarios']` | diccionario de tasas de crecimiento para la planificación hasta `fin_plan` (vacío = la sección 22 queda PENDIENTE) | `{}` |
 | `CFG['usar_temperatura_climatologica']` | agrega temperatura climatológica como exógena (requiere Fase 2 ya corrida) | `True` |
 | `CFG['exportar_excel']` | además de Parquet, exporta también `.xlsx` | `True` |
+| `CFG['reanudar_run']` | ruta de una corrida previa para continuar sin reentrenar (lo fija `--reanudar`) | `None` |
+| `CFG['max_dias_sin_datos']` | series sin dato en más de N días respecto al último global no se proyectan | `180` |
+| `CFG['umbral_sanidad']` | desvío máximo de la media proyectada frente a los últimos 12 meses antes de marcar `REVISAR` | `0.25` |
+| `CFG['workers_pronostico']` | procesos del pronóstico recursivo (cada uno carga su modelo: cuidar la RAM) | `6` |
+| `CFG['backtest_horizontes']` | horizontes (pasos de 15 min) del backtest sin reentrenar; el mayor (2688 = 28 días) decide el método de cada serie | `(96, 672, 2688)` |
+| `CFG['margen_ml']` | el ML solo se usa si su RMSE a 28 días es menor que `margen` × el del mejor perfil | `0.95` |
+| `CFG['max_medidores_adicionales']` | tope de medidores para la sección 26 (`None` = todos los que tengan serie activa) | `None` |
 
 Para una primera corrida de validación deja `--modo rapido`. Para la corrida que vas a
 entregar como resultado final, usa `--modo completo` (tardará mucho más: entrena los 6
@@ -159,7 +167,7 @@ la reimplementa), inyecta `--modo`/`--backend` en `CFG` y **nunca modifica el ar
 fuente** `notebook\proyecciondemanda.ipynb` — siempre escribe una copia ejecutada
 aparte, en `resultados/cli_<fecha>_<hora>/notebook_ejecutado.ipynb`, junto a un
 `*.manifest.json` con el estado, el error (si lo hubo) y la carpeta real de resultados
-del pipeline (`resultados/ejecucion_<fecha>_<hora>/`, la que crea el propio notebook).
+del pipeline (`resultados/<modo>-<backend>_<fecha>_<hora>/`, la que crea el propio notebook).
 
 **Ver las fases disponibles** (son las 26 secciones numeradas del propio notebook, no un
 esquema aparte):
@@ -181,16 +189,65 @@ entrenamiento de modelos — sin llegar todavía a diagnósticos, pronóstico ni
 .\.venv\Scripts\python.exe -m prodma.pipeline --modo rapido --hasta-fase 14
 ```
 
-Cada corrida siempre arranca desde la fase 1 (las fases son *acumulativas*: para llegar
-a la 14 hay que pasar por la 1-13, porque el notebook depende de ese estado — no son
-etapas independientes reanudables desde la mitad). Lo que sí se reaprovecha entre
-corridas es la caché de lectura de Excel (`resultados/cache_v1/`, Parquet) y los modelos
-ya entrenados (`modelos/*.joblib` dentro de cada `ejecucion_<fecha>/`), así que repetir
-una corrida completa después de una parcial no vuelve a leer los Excel desde cero.
+Cada corrida normal arranca desde la fase 1 (las fases son *acumulativas*: para llegar
+a la 14 hay que pasar por la 1-13, porque el notebook depende de ese estado). Entre
+corridas normales solo se reaprovechan las cachés de datos (`resultados/cache_v1/`,
+`cache_matriz_v1/`, `cache_limpio_v1/`): **el entrenamiento se repite completo** y cada
+corrida crea una carpeta nueva. Para NO repetirlo, usa la reanudación (ver abajo).
 
 Otros flags útiles: `--timeout` (segundos por celda, default 7200 — la primera lectura
-de los Excel de `datahistorica/`, ~550 MB en total, es la parte más lenta),
-`--notebook` (ruta alternativa) y `--output` (ruta alternativa para la copia ejecutada).
+de los Excel de `datahistorica/`, ~550 MB en total, es la parte más lenta; la celda del
+pronóstico recursivo puede tardar más, usa p. ej. `--timeout 43200`), `--notebook` (ruta
+alternativa), `--output` (ruta alternativa para la copia ejecutada) y
+`--set CLAVE=VALOR` (sobrescribe una clave de `CFG`, repetible; p. ej.
+`--set workers_pronostico=8`).
+
+### Reanudar una corrida sin reentrenar (`--reanudar`)
+
+Si una corrida completa se interrumpió después del entrenamiento (las secciones 14-16
+tardan decenas de horas), **no hace falta repetirlo**: los modelos (`modelos/*.joblib`) y
+las tablas (`metricas.csv`, `comparacion_completa.csv`, `OLS_referencia.csv`) ya están en
+disco. Continúa en la MISMA carpeta con:
+
+```powershell
+.\.venv\Scripts\python.exe -m prodma.pipeline --reanudar resultados\C-AUT_20260918_105110 --timeout 43200
+```
+
+Qué hace (el `--modo` se toma de la corrida original; no se entrena nada):
+
+1. Ejecuta las secciones 1-13 con las cachés y **omite** el entrenamiento y los
+   diagnósticos ya persistidos (celdas etiquetadas `prodma.omitir_al_reanudar`).
+2. **Sección 14b — restauración**: vuelve a predecir el tramo de prueba con cada modelo
+   guardado, sobre el mismo corte train/test, y **valida** que el RMSE recalculado coincida
+   con `metricas.csv` (`tablas/validacion_restauracion.csv`). Si no coincide, aborta. El
+   estado queda en `tablas/estado_restaurado.joblib`, así que las siguientes reanudaciones
+   tardan segundos en este paso.
+3. El ganador operativo de cada serie es el mejor modelo **ML** por `CV_RMSE`
+   (los benchmarks `Estacional_*` no se usan para pronosticar: recursivamente son una línea
+   plana). Cada serie se clasifica en `tablas/estado_series.csv`: `OK`,
+   `SERIE_CONSTANTE` (se proyecta como constante declarada) o `SIN_DATOS_RECIENTES`
+   (`CFG['max_dias_sin_datos']`, no se proyecta).
+4. Sigue desde la sección 17 hasta el cierre. La sección 20 usa los modelos guardados
+   **sin reentrenar** —entrenados con el 80 % cronológico del histórico—. Un modelo entrenado
+   a 1 paso **pierde el nivel en pocos días** al pronosticar de forma recursiva (converge a un
+   punto fijo; el R² a 1 paso no lo revela), así que el método de cada serie se **elige por
+   backtest a 28 días** sobre datos que el modelo no vio: ML recursivo, perfil calendario
+   (mediana de 12 meses) o perfil anclado (forma estacional × nivel reciente
+   desestacionalizado, sin entrenamiento). El ML solo se usa donde mejora al mejor perfil en
+   más de `1-CFG['margen_ml']` y pasa las guardas de sanidad. El resultado por serie queda en
+   `tablas/seleccion_metodo.csv` y en la columna `fuente` de
+   `pronosticos/serie_<medidor>_<var>.parquet` (checkpoint por serie: si se interrumpe, al
+   reanudar solo se calculan las pendientes; borra esos archivos si cambias la lógica). El
+   ML se proyecta hasta el cierre solo donde ganó, con una serie por proceso
+   (`CFG['workers_pronostico']`).
+
+Con `CFG['fin_plan']='2028-01-01 00:00'` el horizonte cierra el 31-dic-2027 (la marca
+00:00 del 1-ene cierra el año, convención de fin de intervalo). Las guardas de sanidad
+comparan cada proyección ML con los últimos 12 meses (`CFG['umbral_sanidad']`); si se
+aparta, se aplana o sale de rango, se descarta y se usa el mejor perfil
+(`tablas/sanidad_proyecciones.csv`, columna `fallback`). Cada archivo por serie guarda
+`pred` (la proyección final) y las alternativas `pred_ml`, `pred_perfil_anclado` y
+`pred_perfil_calendario`.
 
 Si prefieres verlo correr celda a celda de forma interactiva (para revisar una figura
 antes de seguir, o pausar con más control que el que dan las 26 fases), ábrelo en VS
@@ -201,7 +258,7 @@ sirviendo el flujo manual.
 
 ## Fase 5 · Verificar que la ejecución salió bien
 
-Cada corrida crea una carpeta independiente `resultados/ejecucion_<fecha>_<hora>/`.
+Cada corrida crea una carpeta independiente `resultados/<modo>-<backend>_<fecha>_<hora>/`.
 Verifica en este orden:
 
 1. **`RESUMEN.json`** (en la raíz de la carpeta de la ejecución) — campo
@@ -219,14 +276,14 @@ Verifica en este orden:
    notebook).
 
 ```powershell
-Get-Content resultados\ejecucion_<fecha>_<hora>\RESUMEN.json
+Get-Content resultados\<modo>-<backend>_<fecha>_<hora>\RESUMEN.json
 ```
 
 ---
 
 ## Fase 6 · Dónde están los resultados para entregar
 
-Dentro de `resultados/ejecucion_<fecha>_<hora>/`:
+Dentro de `resultados/<modo>-<backend>_<fecha>_<hora>/`:
 
 | Carpeta/archivo | Contenido |
 |---|---|
@@ -239,13 +296,20 @@ Dentro de `resultados/ejecucion_<fecha>_<hora>/`:
 | `tablas/Escenarios_DIgSILENT_MaxPromMin.xlsx` | Tabla lista para pegar en PowerFactory |
 | `pronosticos/operativo_<medidor>_<var>_<año>.parquet/xlsx` | Pronóstico ML recursivo, un archivo por año calendario |
 | `pronosticos/Matriz_Operativa.xlsx` | Pronóstico total (base + nuevos clientes), todos los medidores |
+| `pronosticos/serie_<medidor>_<var>.parquet` | Checkpoint por serie: `pred` (final), `pred_ml`, `pred_perfil`, `fuente`, marcas de sanidad |
+| `tablas/estado_series.csv`, `estado_proyeccion.csv` | Estado de cada serie (`OK`/`SERIE_CONSTANTE`/`SIN_DATOS_RECIENTES`) y si se proyectó |
+| `tablas/sanidad_proyecciones.csv` | Guardas de sanidad: desvío de la media, aplanamiento, fuera de rango y fuente usada (ML o perfil calendario) |
+| `tablas/verificacion_proyecciones.csv` | Cada proyección cubre hasta `fin_plan`, sin huecos, finita y no plana |
+| `tablas/backtest_recursivo.csv`, `seleccion_metodo.csv` | Backtest sin reentrenar por serie y método (ML, perfiles, semanal) y método elegido por serie (`fuera_de_muestra` indica si la ventana no entró al entrenamiento) |
+| `tablas/Escenarios_DIgSILENT_<año>_proyectado.xlsx` | Máx/prom/mín proyectadas por medidor para el último año del horizonte |
+| `tablas/validacion_restauracion.csv`, `estado_restaurado.joblib` | Solo al reanudar: RMSE guardado vs. restaurado de cada modelo y checkpoint del estado |
 | `pronosticos/plan_<medidor>_<escenario>_<año>.xlsx` | Planificación por perfiles/tasas (si se configuraron escenarios) |
 | `figuras/*.png` | Todas las gráficas (curvas, boxplots, correlaciones, proyecciones, entrenamiento) |
 | `modelos/*.joblib` | Modelos entrenados serializados |
 | `RESUMEN.json` | Resumen ejecutivo de la corrida (ver Fase 5) |
 | `entorno.txt` | `pip freeze` exacto de esa corrida, para reproducibilidad |
 
-Para entregar resultados, comparte la carpeta `resultados/ejecucion_<fecha>_<hora>/`
+Para entregar resultados, comparte la carpeta `resultados/<modo>-<backend>_<fecha>_<hora>/`
 completa (o el subconjunto de `tablas/`, `figuras/` y `pronosticos/` que corresponda) —
 nunca se sobreescribe una corrida anterior, así que puedes comparar entre ejecuciones.
 
@@ -260,12 +324,24 @@ una figura o tabla si no estás seguro de cuál carpeta es la actual.
 ## Limitaciones que hay que tener presentes (no ocultarlas al entregar)
 
 - **La CLI (`python -m prodma.pipeline`) envuelve el notebook, no lo reemplaza**: las
-  "fases" son las 26 secciones del propio notebook (acumulativas, no independientes), y
-  toda la lógica de negocio sigue viviendo ahí — no hay todavía módulos separados
-  (`inventory.py`, `features.py`, `models.py`, etc.) ni un manifiesto con
-  reanudación fina por etapa (`inventory→parse→quality→...`) como describe el plan de
-  arquitectura completo en `docs/superpowers/plans/`. Lo que sí reanuda de verdad es la
-  caché de Excel/modelos ya entrenados (ver Fase 4).
+  "fases" son las 26 secciones del propio notebook y buena parte de la lógica de negocio
+  sigue viviendo ahí. Ya están en `src/prodma/` la reanudación (`reanudar.py`), el
+  pronóstico recursivo (`recursivo.py`), las guardas de sanidad (`sanidad.py`) y la
+  transformación del target (`transformaciones.py`); no hay todavía un manifiesto con
+  reanudación fina por etapa como el del plan de arquitectura completo. Lo que se
+  reanuda de verdad es lo descrito en «Reanudar una corrida sin reentrenar» (Fase 4).
+- **Pronóstico sin reentrenar con el 100 % del histórico.** Con `--reanudar`, los modelos
+  se entrenaron con el 80 % cronológico más antiguo de cada serie y los árboles no
+  extrapolan por encima de lo visto al entrenar. La recursión ML a 15 min **pierde el
+  nivel en pocos días** (medido: el RMSE a 7-28 días de los modelos recursivos no mejora al
+  de un perfil estacional), así que la mayoría de las series se proyectan con perfiles
+  (calendario o anclado) elegidos por backtest a 28 días. **No hay validación a 16 meses**
+  y ninguna proyección incluye crecimiento más allá del nivel reciente (la sección 22, con
+  tasas de crecimiento explícitas, sigue PENDIENTE hasta que se definan). Revisa
+  `seleccion_metodo.csv` y `sanidad_proyecciones.csv` antes de entregar.
+- **Series sin datos recientes o constantes.** No se proyectan (o se proyectan como
+  constante declarada); ver `estado_proyeccion.csv`. Confirma con el operador si los
+  medidores sin datos recientes fueron dados de baja.
 - **LightGBM en GPU (OpenCL) puede no estar disponible en Windows** aunque XGBoost/CatBoost
   sí lo estén: la celda 13 lo prueba con un microentrenamiento real y cae a CPU
   automáticamente sin detener la ejecución; revisa `logs/backends_gpu.csv` de la corrida
