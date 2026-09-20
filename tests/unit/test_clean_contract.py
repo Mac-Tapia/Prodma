@@ -44,8 +44,30 @@ def test_cleaning_stage_publishes_matrix_and_hash(tmp_path):
     result = run_cleaning(None, layout)
 
     matrix = pd.read_parquet(result.artifacts["matrix"])
-    assert "M1__P__objetivo" in matrix
-    assert np.isnan(matrix.loc[idx[1], "M1__P__objetivo"])
+    assert list(matrix.columns) == ["M1_P", "M1_Q"]
+    assert matrix.loc[idx[1], "M1_P"] == 1.0
     assert len(result.artifacts["sha256"]) == 64
+    quality = pd.read_parquet(result.artifacts["quality"])
+    assert np.isnan(quality.loc[idx[1], "M1__P__objetivo"])
     assert (layout.stage("02_limpieza", "estadistica_descriptiva") / "resumen_por_medidor.csv").is_file()
     assert (layout.stage("02_limpieza", "figuras") / "M1_P_crudo_limpio.png").stat().st_size > 0
+
+
+def test_latest_year_defines_canonical_meter_catalog(tmp_path):
+    layout = RunLayout.create(tmp_path, "r1")
+    idx = pd.date_range("2025-01-01", periods=2, freq="15min", name="Fecha")
+    old = layout.stage("01_ingesta", "parquet") / "old.parquet"
+    current = layout.stage("01_ingesta", "parquet") / "current.parquet"
+    pd.DataFrame({"P": [1.0, 2.0], "Q": [3.0, 4.0]}, index=idx).to_parquet(old)
+    pd.DataFrame({"P": [5.0, 6.0], "Q": [7.0, 8.0], "S_medida": [9.0, 10.0]}, index=idx).to_parquet(current)
+    catalog = {"sheets": [
+        {"estado": "ok", "anio": 2025, "medidor": "RETIRADO", "path": str(old)},
+        {"estado": "ok", "anio": 2026, "medidor": "ACTUAL", "path": str(current)},
+    ]}
+    (layout.stage("01_ingesta") / "catalogo.json").write_text(json.dumps(catalog), encoding="utf-8")
+
+    result = run_cleaning(None, layout)
+    matrix = pd.read_parquet(result.artifacts["matrix"])
+
+    assert list(matrix.columns) == ["ACTUAL_P", "ACTUAL_Q", "ACTUAL_S"]
+    assert not any("RETIRADO" in column for column in matrix.columns)

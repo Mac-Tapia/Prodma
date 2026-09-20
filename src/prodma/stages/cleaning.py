@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from prodma.artifacts import RunLayout
@@ -35,13 +38,21 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         raise FileNotFoundError(f"Falta catalogo de ingesta: {catalog_path}")
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     rows = [row for row in catalog.get("sheets", []) if row.get("estado") == "ok"]
+    years = [int(row["anio"]) for row in rows if row.get("anio") is not None]
+    canonical_year = max(years) if years else None
+    canonical_meters = (
+        {row["medidor"] for row in rows if row.get("anio") == canonical_year}
+        if canonical_year is not None else {row["medidor"] for row in rows}
+    )
     by_meter: dict[str, list[pd.DataFrame]] = {}
     for row in rows:
-        by_meter.setdefault(row["medidor"], []).append(pd.read_parquet(row["path"]))
+        if row["medidor"] in canonical_meters:
+            by_meter.setdefault(row["medidor"], []).append(pd.read_parquet(row["path"]))
     cleaning_cfg = getattr(config, "raw", {}).get("cleaning", {}) if config is not None else {}
     forward_limit = int(cleaning_cfg.get("forward_fill_limit", 4))
     weekly_lag = int(cleaning_cfg.get("weekly_lag", 672))
-    columns: dict[str, pd.Series] = {}
+    quality_columns: dict[str, pd.Series] = {}
+    value_columns: dict[str, pd.Series] = {}
     descriptions: list[dict] = []
     electrical_rows: list[pd.DataFrame] = []
     for meter, parts in sorted(by_meter.items()):
@@ -69,6 +80,8 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
             clean.loc[clean["es_observado"], "objetivo"] = clean.loc[clean["es_observado"], "limpio"]
             clean.loc[clean["es_observado"], "contexto"] = clean.loc[clean["es_observado"], "limpio"]
             descriptions.append({"medidor": meter, "variable": variable, **describe_variable(clean)})
+            output_variable = "S" if variable == "S_medida" else variable
+            value_columns[f"{meter}_{output_variable}"] = clean["contexto"]
             figure, axis = plt.subplots(figsize=(12, 4))
             axis.plot(clean.index, clean["observado"].to_numpy(), color="lightgray", linewidth=0.7, label="observado")
             axis.plot(clean.index, clean["limpio"].to_numpy(), color="tab:blue", linewidth=0.8, label="limpio")
@@ -78,14 +91,21 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
             figure.savefig(layout.stage("02_limpieza", "figuras") / f"{meter}_{variable}_crudo_limpio.png", dpi=120)
             plt.close(figure)
             for field in clean:
-                columns[f"{meter}__{variable}__{field}"] = clean[field]
-    if not columns:
+                quality_columns[f"{meter}__{variable}__{field}"] = clean[field]
+    if not value_columns:
         raise ValueError("La ingesta no contiene series limpiables")
-    matrix = pd.concat(columns, axis=1)
+    matrix = pd.concat(value_columns, axis=1)
+    quality = pd.concat(quality_columns, axis=1)
     target = matrix_output_path(layout)
     matrix.to_parquet(target)
+    quality_target = layout.stage("02_limpieza", "datos") / "matriz_calidad.parquet"
+    quality.to_parquet(quality_target)
     digest = _sha256(target)
-    metadata = {"matrix": str(target), "sha256": digest, "rows": len(matrix), "columns": len(matrix.columns)}
+    metadata = {
+        "matrix": str(target), "quality": str(quality_target), "sha256": digest,
+        "rows": len(matrix), "columns": len(matrix.columns), "meters": len(by_meter),
+        "canonical_year": canonical_year,
+    }
     metadata_path = layout.stage("02_limpieza", "auditoria") / "matriz_limpia.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     pd.DataFrame(descriptions).to_csv(layout.stage("02_limpieza", "estadistica_descriptiva") / "resumen_por_medidor.csv", index=False)
