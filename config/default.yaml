@@ -1,0 +1,28 @@
+project_root: ..
+output_root: resultados
+frequency: 15min
+timezone: America/Lima
+seed: 42
+horizons: [96, 672, 2688]
+
+inputs:
+  historical_dir: datahistorica
+  new_customers_dir: nuevosclientes
+  years: [2023, 2024, 2025, 2026]
+
+cleaning:
+  forward_fill_limit: 4
+  weekly_lag: 672
+  outlier_window: 672
+  outlier_threshold: 6.0
+
+training:
+  prefilter_max_seconds: 300
+  seed: 42
+
+evaluation:
+  alpha: 0.05
+  minimum_improvement: 0.0
+
+prediction:
+  planning_end: "2028-01-01 00:00"

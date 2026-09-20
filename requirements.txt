@@ -34,6 +34,7 @@ seaborn
 
 # Utilidades
 psutil
+PyYAML>=6,<7
 nbformat
 pytest>=8,<10
 
