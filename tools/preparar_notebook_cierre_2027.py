@@ -877,6 +877,24 @@ def parte_3(nb) -> None:
                "    metodo_por_serie={e:int(n) for e,n in SANIDAD_DF.fuente.value_counts().items()} if len(SANIDAD_DF) else {},")
 
 
+def parte_4(nb) -> None:
+    """Detalles al reanudar: el registro de eventos no duplica lo ya registrado y RESUMEN.json va en UTF-8."""
+    i = celda_con(nb, "LOG=pd.read_csv(RUN/'logs/eventos.csv').fillna('').to_dict('records')")
+    reemplazar(nb, i,
+               "    LOG=pd.read_csv(RUN/'logs/eventos.csv').fillna('').to_dict('records')  # conserva los eventos previos\n"
+               "def log(stage,item,status,detail=''):\n"
+               "    LOG.append(dict(etapa=stage,item=str(item),estado=status,detalle=str(detail)))\n",
+               "    LOG=pd.read_csv(RUN/'logs/eventos.csv',dtype=str,keep_default_na=False).to_dict('records')  # conserva los eventos previos\n"
+               "    LOG=[e for k,e in enumerate(LOG) if e not in LOG[:k]]   # sin duplicados de reanudaciones anteriores\n"
+               "def log(stage,item,status,detail=''):\n"
+               "    evento=dict(etapa=stage,item=str(item),estado=status,detalle=str(detail))\n"
+               "    if REANUDANDO and evento in LOG: return   # una reanudación no repite eventos ya registrados\n"
+               "    LOG.append(evento)\n")
+    i = celda_con(nb, "(RUN/'RESUMEN.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False))")
+    reemplazar(nb, i, "(RUN/'RESUMEN.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False))",
+               "(RUN/'RESUMEN.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False),encoding='utf-8')")
+
+
 def main() -> int:
     nb = nbformat.read(NOTEBOOK, as_version=4)
     fuentes = [c.source for c in nb.cells if c.cell_type == "code"]
@@ -889,6 +907,9 @@ def main() -> int:
         cambios = True
     if not any("H_SEL=max(" in f for f in fuentes):
         parte_3(nb)
+        cambios = True
+    if not any("sin duplicados de reanudaciones anteriores" in f for f in fuentes):
+        parte_4(nb)
         cambios = True
     if not cambios:
         print("El notebook ya tiene los cambios del cierre 2027; no se modifica.")

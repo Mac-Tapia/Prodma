@@ -43,13 +43,16 @@ def calendar_profile(s: pd.Series, index: pd.DatetimeIndex) -> np.ndarray:
     return _mapear(tab, reserva, train.median(), index)
 
 
-def perfil_anclado(s: pd.Series, index: pd.DatetimeIndex, dias_nivel: int = 90,
+def perfil_anclado(s: pd.Series, index: pd.DatetimeIndex, dias_nivel: int = 28,
                    ventana_tendencia: int = 365) -> np.ndarray:
     """Forma estacional (mes, día de semana, bloque) x nivel reciente desestacionalizado.
 
     Sin entrenamiento. Separa la tendencia (media móvil centrada de ``ventana_tendencia``
     días) de la estacionalidad usando TODO el historial disponible, y ancla el nivel a los
-    últimos ``dias_nivel`` días una vez quitada la estacionalidad. A diferencia de
+    últimos ``dias_nivel`` días una vez quitada la estacionalidad. Con 28 días (cuatro ciclos
+    semanales completos) el error a 7 y 28 días fue menor que con 56, 90 o 120 días en dos
+    cortes de backtest (130 series); 14 días rinde algo mejor pero un solo evento en las
+    últimas dos semanas contaminaría todo el horizonte. A diferencia de
     ``calendar_profile`` (mediana de los últimos 12 meses, que arrastra el nivel del año
     anterior) no subestima cuando la demanda creció, ni sobreestima cuando cayó.
     Multiplicativo si la serie es positiva; aditivo si tiene valores negativos (p. ej. Q).

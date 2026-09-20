@@ -333,9 +333,11 @@ una figura o tabla si no estás seguro de cuál carpeta es la actual.
 - **Pronóstico sin reentrenar con el 100 % del histórico.** Con `--reanudar`, los modelos
   se entrenaron con el 80 % cronológico más antiguo de cada serie y los árboles no
   extrapolan por encima de lo visto al entrenar. La recursión ML a 15 min **pierde el
-  nivel en pocos días** (medido: el RMSE a 7-28 días de los modelos recursivos no mejora al
-  de un perfil estacional), así que la mayoría de las series se proyectan con perfiles
-  (calendario o anclado) elegidos por backtest a 28 días. **No hay validación a 16 meses**
+  nivel en pocos días**: en el backtest de la corrida `C-AUT_20260918_105110` (130 series,
+  124 fuera de muestra) el RMSE mediano relativo al desvío real fue, a 1 día / 7 días / 28
+  días, de 0,90 / 1,23 / 1,32 para el ML recursivo frente a 0,69 / 0,78 / 0,96 del perfil
+  anclado (1,0 = no mejorar a la media). Por eso la mayoría de las series se proyectan con
+  perfiles (calendario o anclado) elegidos por backtest a 28 días. **No hay validación a 16 meses**
   y ninguna proyección incluye crecimiento más allá del nivel reciente (la sección 22, con
   tasas de crecimiento explícitas, sigue PENDIENTE hasta que se definan). Revisa
   `seleccion_metodo.csv` y `sanidad_proyecciones.csv` antes de entregar.
