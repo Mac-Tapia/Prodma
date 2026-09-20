@@ -47,3 +47,5 @@ def test_cleaning_stage_publishes_matrix_and_hash(tmp_path):
     assert "M1__P__objetivo" in matrix
     assert np.isnan(matrix.loc[idx[1], "M1__P__objetivo"])
     assert len(result.artifacts["sha256"]) == 64
+    assert (layout.stage("02_limpieza", "estadistica_descriptiva") / "resumen_por_medidor.csv").is_file()
+    assert (layout.stage("02_limpieza", "figuras") / "M1_P_crudo_limpio.png").stat().st_size > 0
