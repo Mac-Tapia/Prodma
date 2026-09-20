@@ -11,12 +11,17 @@ Uso:
     python -m prodma.pipeline --listar-fases
     python -m prodma.pipeline --modo rapido --backend auto
     python -m prodma.pipeline --modo completo --backend gpu --hasta-fase 14
+    python -m prodma.pipeline --reanudar resultados/C-AUT_20260918_105110 --timeout 43200
+
+`--reanudar` continúa en la carpeta de una corrida previa SIN reentrenar: omite las secciones
+14-16 (ya persistidas), restaura el estado desde los modelos guardados y sigue desde la 17.
 
 Ver docs/MANUAL_EJECUCION.md para el flujo completo.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -49,6 +54,19 @@ def listar_fases(nb) -> list[tuple[int, str, int]]:
         if m:
             fases.append((int(m.group(1)), primera.lstrip('#').strip(), i))
     return fases
+
+
+def filtrar_celdas_reanudacion(nb, reanudando: bool):
+    """Quita del notebook las celdas que no corresponden al modo de ejecución.
+
+    Las celdas etiquetadas ``prodma.omitir_al_reanudar`` (entrenamiento y diagnósticos ya
+    persistidos) solo corren en una ejecución normal; las etiquetadas
+    ``prodma.solo_al_reanudar`` (restauración del estado) solo al reanudar. Se hace sobre la
+    copia en memoria: el notebook fuente no cambia.
+    """
+    etiqueta_omitir = 'omitir_al_reanudar' if reanudando else 'solo_al_reanudar'
+    nb.cells = [c for c in nb.cells if not c.metadata.get('prodma', {}).get(etiqueta_omitir)]
+    return nb
 
 
 def indice_hasta_fase(nb, hasta_fase: int | None, fases: list[tuple[int, str, int]]) -> int:
@@ -90,14 +108,33 @@ def asegurar_kernel(nombre: str = 'prodma_venv') -> str:
     return nombre
 
 
-def construir_celda_overrides(modo: str | None, backend: str | None) -> str:
+def parsear_overrides(pares: list[str] | None) -> dict:
+    """['clave=valor', ...] -> {clave: valor}; el valor se interpreta como literal de Python."""
+    out = {}
+    for par in pares or []:
+        if '=' not in par:
+            raise SystemExit(f"--set espera CLAVE=VALOR, recibió {par!r}")
+        clave, valor = par.split('=', 1)
+        try:
+            out[clave.strip()] = ast.literal_eval(valor)
+        except (ValueError, SyntaxError):
+            out[clave.strip()] = valor
+    return out
+
+
+def construir_celda_overrides(modo: str | None, backend: str | None, reanudar: str | None = None,
+                              extra: dict | None = None) -> str:
     lineas = ["# --- Overrides inyectados por 'python -m prodma.pipeline' (no persistidos en el notebook fuente) ---"]
     if modo is not None:
         lineas.append(f"CFG['modo']={modo!r}")
     if backend is not None:
         lineas.append(f"CFG['backend']={backend!r}")
-    lineas.append("print('CFG overrides aplicados por CLI:', "
-                   "{k: CFG[k] for k in ('modo','backend') if k in CFG})")
+    if reanudar is not None:
+        lineas.append(f"CFG['reanudar_run']={reanudar!r}")
+    for clave, valor in (extra or {}).items():
+        lineas.append(f"CFG[{clave!r}]={valor!r}")
+    claves = ['modo', 'backend'] + (['reanudar_run'] if reanudar is not None else []) + list(extra or {})
+    lineas.append(f"print('CFG overrides aplicados por CLI:', {{k: CFG[k] for k in {claves!r} if k in CFG}})")
     return '\n'.join(lineas)
 
 
@@ -161,10 +198,11 @@ def ejecutar(nb, args, fases: list[tuple[int, str, int]]) -> dict:
     )
     overrides_aplicables = idx_config is not None and idx_config <= idx_ultimo
     if overrides_aplicables:
-        celda = nbformat.v4.new_code_cell(construir_celda_overrides(args.modo, args.backend))
+        celda = nbformat.v4.new_code_cell(construir_celda_overrides(
+            args.modo, args.backend, str(args.reanudar) if args.reanudar else None, args.overrides))
         nb.cells.insert(idx_config + 1, celda)
         idx_ultimo += 1
-    elif args.modo is not None or args.backend is not None:
+    elif args.modo is not None or args.backend is not None or args.reanudar or args.overrides:
         print(f"AVISO: --hasta-fase {args.hasta_fase} termina antes de la celda de "
               "configuración; --modo/--backend no se aplican en esta corrida.")
 
@@ -191,6 +229,7 @@ def ejecutar(nb, args, fases: list[tuple[int, str, int]]) -> dict:
         hasta_fase=args.hasta_fase, modo_solicitado=args.modo, backend_solicitado=args.backend,
         overrides_aplicados=overrides_aplicables, kernel=nombre_kernel,
         inicio=time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(inicio)),
+        reanudar=str(args.reanudar) if args.reanudar else None, overrides_extra=args.overrides,
         fin=time.strftime('%Y-%m-%dT%H:%M:%S'), segundos=round(time.time() - inicio, 1),
         celdas_ejecutadas=len(nb.cells), estado=estado, error=error_detalle,
         resultados_run_dir=extraer_run_dir(nb),
@@ -224,6 +263,13 @@ def construir_parser() -> argparse.ArgumentParser:
                          help="Sobrescribe CFG['modo'] (por defecto: el que ya tiene el notebook).")
     parser.add_argument('--backend', choices=['auto', 'cpu', 'gpu'], default=None,
                          help="Sobrescribe CFG['backend'] usado por el preflight GPU (sección 13).")
+    parser.add_argument('--reanudar', type=Path, default=None, metavar='CARPETA',
+                         help='Continúa en la carpeta de una corrida previa (resultados/<corrida>) SIN reentrenar: '
+                              'omite las secciones 14-16, restaura el estado desde los modelos guardados y sigue '
+                              'desde la 17. Si no se indica --modo, se toma el de esa corrida.')
+    parser.add_argument('--set', dest='sobrescribir', action='append', metavar='CLAVE=VALOR',
+                         help="Sobrescribe una clave de CFG (valor como literal de Python), p. ej. "
+                              "--set workers_pronostico=8 --set max_medidores_adicionales=5. Repetible.")
     parser.add_argument('--hasta-fase', type=int, default=None, metavar='N',
                          help='Ejecuta solo hasta la sección numerada N (ver --listar-fases). '
                               'Por defecto corre el notebook completo.')
@@ -242,7 +288,17 @@ def construir_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = construir_parser().parse_args(argv)
+    args.overrides = parsear_overrides(args.sobrescribir)
+    if args.reanudar is not None:
+        if not args.reanudar.is_absolute():
+            args.reanudar = (RAIZ_PROYECTO / args.reanudar).resolve()
+        config_origen = args.reanudar / 'config.json'
+        if not (args.reanudar / 'modelos').is_dir() or not config_origen.exists():
+            raise SystemExit(f'--reanudar: {args.reanudar} no parece una corrida previa (falta modelos/ o config.json)')
+        if args.modo is None:  # la configuración de la reanudación debe coincidir con la que entrenó los modelos
+            args.modo = json.loads(config_origen.read_text(encoding='utf-8'))['modo']
     nb = nbformat.read(args.notebook, as_version=4)
+    filtrar_celdas_reanudacion(nb, reanudando=args.reanudar is not None)
     fases = listar_fases(nb)
 
     if args.listar_fases:
