@@ -55,6 +55,8 @@ def test_cleaning_stage_publishes_matrix_and_hash(tmp_path):
 
 def test_latest_year_defines_canonical_meter_catalog(tmp_path):
     layout = RunLayout.create(tmp_path, "r1")
+    stale = layout.stage("02_limpieza", "figuras") / "RETIRADO_P_crudo_limpio.png"
+    stale.write_bytes(b"stale")
     idx = pd.date_range("2025-01-01", periods=2, freq="15min", name="Fecha")
     old = layout.stage("01_ingesta", "parquet") / "old.parquet"
     current = layout.stage("01_ingesta", "parquet") / "current.parquet"
@@ -71,3 +73,4 @@ def test_latest_year_defines_canonical_meter_catalog(tmp_path):
 
     assert list(matrix.columns) == ["ACTUAL_P", "ACTUAL_Q", "ACTUAL_S"]
     assert not any("RETIRADO" in column for column in matrix.columns)
+    assert not stale.exists()

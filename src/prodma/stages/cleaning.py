@@ -49,6 +49,8 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         if row["medidor"] in canonical_meters:
             by_meter.setdefault(row["medidor"], []).append(pd.read_parquet(row["path"]))
     cleaning_cfg = getattr(config, "raw", {}).get("cleaning", {}) if config is not None else {}
+    for stale_figure in layout.stage("02_limpieza", "figuras").glob("*_crudo_limpio.png"):
+        stale_figure.unlink()
     forward_limit = int(cleaning_cfg.get("forward_fill_limit", 4))
     weekly_lag = int(cleaning_cfg.get("weekly_lag", 672))
     quality_columns: dict[str, pd.Series] = {}
