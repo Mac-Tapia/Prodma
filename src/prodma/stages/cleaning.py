@@ -12,6 +12,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from prodma.artifacts import RunLayout
+from prodma.exogenas.catalog import build_exogenous_catalog
+from prodma.exogenas.validation import validate_exogenous_sources
 from prodma.limpieza.temporal import build_clean_variable
 from prodma.limpieza.descriptive import describe_variable, normality_diagnostics, plot_distribution_diagnostics
 from prodma.limpieza.electrical import ElectricalLimits, electrical_flags
@@ -145,6 +147,14 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
     matrix = pd.concat(value_columns, axis=1) if value_columns else pd.DataFrame()
     recent = pd.concat(recent_columns, axis=1) if recent_columns else pd.DataFrame()
     quality = pd.concat(quality_columns, axis=1)
+    exogenous_report = None
+    if config is not None and config.raw.get("exogenous", {}).get("sources"):
+        exogenous_report = validate_exogenous_sources(
+            build_exogenous_catalog(config), matrix.index, timezone=config.timezone
+        )
+        (layout.stage("02_limpieza", "auditoria") / "exogenas_validacion.json").write_text(
+            json.dumps(exogenous_report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     target = matrix_output_path(layout)
     matrix.to_parquet(target)
     recent_target = layout.stage("02_limpieza", "datos") / "matriz_medidores_recientes.parquet"
@@ -157,6 +167,7 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         "rows": len(matrix), "columns": len(matrix.columns), "meters": len(by_meter),
         "canonical_year": canonical_year, "recent_meters": len(recent_meters),
         "meters_without_data": len(meters_without_data),
+        "exogenous_sources_validated": len(exogenous_report.items) if exogenous_report else 0,
     }
     metadata_path = layout.stage("02_limpieza", "auditoria") / "matriz_limpia.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
