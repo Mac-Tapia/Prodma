@@ -191,11 +191,15 @@ def pbi_en_fecha(indice: pd.DatetimeIndex, pbi_mensual: pd.Series) -> pd.Series:
     observado constante -- una proyeccion economica real esta fuera de alcance de este
     proyecto; mantener el ultimo nivel conocido es la asuncion mas simple y declarada,
     no una prediccion de crecimiento economico futuro."""
-    mes_de_cada_fecha = indice.to_period('M').to_timestamp()
-    valores = pd.Series(mes_de_cada_fecha.map(pbi_mensual), index=indice, dtype=float)
-    ultimo_valor = float(pbi_mensual.iloc[-1])
-    valores = valores.fillna(ultimo_valor)
-    return valores
+    source = pbi_mensual.sort_index()
+    targets = pd.DataFrame({'timestamp': pd.DatetimeIndex(indice)})
+    values = pd.DataFrame({'periodo': pd.to_datetime(source.index), 'valor': source.to_numpy(dtype=float)})
+    joined = pd.merge_asof(
+        targets.sort_values('timestamp'), values.sort_values('periodo'),
+        left_on='timestamp', right_on='periodo', direction='backward',
+    )
+    result = pd.Series(joined['valor'].to_numpy(dtype=float), index=pd.DatetimeIndex(joined['timestamp']))
+    return result.reindex(pd.DatetimeIndex(indice))
 
 
 def poblacion_en_fecha(indice: pd.DatetimeIndex, poblacion_anual: pd.Series) -> pd.Series:
