@@ -5,6 +5,16 @@ import numpy as np
 import pandas as pd
 
 
+def join_exogenous_features(endogenous: pd.DataFrame, exogenous: pd.DataFrame) -> pd.DataFrame:
+    """Une solo por indice identico; nunca expande la ventana de la demanda."""
+    if not endogenous.index.equals(exogenous.index):
+        raise ValueError("indice exogeno desalineado")
+    overlap = set(endogenous).intersection(exogenous)
+    if overlap:
+        raise ValueError(f"columnas exogenas duplicadas: {sorted(overlap)}")
+    return pd.concat([endogenous, exogenous], axis=1)
+
+
 def make_features(clean: pd.DataFrame) -> pd.DataFrame:
     z = clean["contexto"].astype(float)
     idx = pd.DatetimeIndex(clean.index)
