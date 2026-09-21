@@ -235,7 +235,28 @@ Se publicaran por separado:
 8. Publicar matrices separadas y reporte metodologico.
 9. Habilitar para entrenamiento solo series que superen cobertura y error.
 
-## 14. Sustento cientifico
+## 14. Estadistica descriptiva y ruta inferencial
+
+Para cada P, Q y S se publicaran conteos, cobertura, media, mediana,
+desviacion, MAD, coeficiente de variacion, percentiles 1/5/25/75/95/99,
+IQR, asimetria, curtosis, ceros, negativos y atipicos. Los calculos usaran
+solo observaciones reales; las imputaciones se contabilizan por separado.
+
+La normalidad se estudiara sobre la diferencia estacional observada a una
+semana (672 intervalos), no sobre el nivel bruto estacional. Se aplicaran
+D'Agostino-Pearson, Jarque-Bera y Anderson-Darling, junto con limites de
+asimetria y curtosis, y se generaran histograma y grafico Q-Q. Solo la
+convergencia de todos los criterios producira `parametrica_candidata`.
+En otro caso se seleccionara `no_parametrica`; una muestra menor de 20 o
+constante se marcara `muestra_insuficiente`.
+
+Esta decision no certifica independencia, estacionariedad ni
+homocedasticidad. Esos supuestos se evaluaran sobre errores comparables en el
+modulo 4 antes de ejecutar pruebas entre modelos. Con muestras grandes se
+reportaran tambien forma y graficos para evitar decidir unicamente por el
+p-valor.
+
+## 15. Sustento cientifico
 
 - Wang, Tsai y Lin (2021), comparacion de interpolacion lineal, ARIMA, KNN,
   MLP y SVR para datos electricos faltantes, *Expert Systems with

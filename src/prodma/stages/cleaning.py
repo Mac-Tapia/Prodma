@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 from prodma.artifacts import RunLayout
 from prodma.limpieza.temporal import build_clean_variable
-from prodma.limpieza.descriptive import describe_variable
+from prodma.limpieza.descriptive import describe_variable, normality_diagnostics, plot_distribution_diagnostics
 from prodma.limpieza.electrical import ElectricalLimits, electrical_flags
 from prodma.limpieza.outliers import detect_causal_outliers
 from prodma.series import resolver_duplicados
@@ -66,6 +66,7 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
     recent_columns: dict[str, pd.Series] = {}
     meters_without_data: list[dict] = []
     descriptions: list[dict] = []
+    normality_rows: list[dict] = []
     electrical_rows: list[pd.DataFrame] = []
     for meter, parts in sorted(by_meter.items()):
         raw = resolver_duplicados(pd.concat(parts).sort_index())
@@ -96,6 +97,36 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
             clean.loc[clean["es_observado"], "objetivo"] = clean.loc[clean["es_observado"], "limpio"]
             clean.loc[clean["es_observado"], "contexto"] = clean.loc[clean["es_observado"], "limpio"]
             descriptions.append({"medidor": meter, "variable": variable, **describe_variable(clean)})
+            seasonal_difference = clean["observado"] - clean["observado"].shift(weekly_lag)
+            diagnostic = normality_diagnostics(
+                seasonal_difference,
+                alpha=float(getattr(config, "raw", {}).get("evaluation", {}).get("alpha", 0.05))
+                if config is not None else 0.05,
+            )
+            route = diagnostic["decision_inferencial"]
+            recommendations = {
+                "parametrica_candidata": ("t_pareada_sobre_diferencial_de_perdida", "anova_medidas_repetidas"),
+                "no_parametrica": ("wilcoxon_pareado_con_ajuste_holm", "friedman_y_posthoc_holm"),
+                "muestra_insuficiente": ("no_aplica", "no_aplica"),
+            }
+            two_models, multiple_models = recommendations[str(route)]
+            normality_rows.append({
+                "medidor": meter,
+                "variable": variable,
+                "serie_evaluada": "diferencia_estacional_observada",
+                "rezago": weekly_lag,
+                **diagnostic,
+                "prueba_dos_modelos": two_models,
+                "prueba_tres_o_mas_modelos": multiple_models,
+                "nota": "ruta_preliminar; confirmar sobre diferenciales de error en modulo_04",
+            })
+            stats_figures = layout.stage("02_limpieza", "estadistica_descriptiva") / "figuras"
+            stats_figures.mkdir(parents=True, exist_ok=True)
+            plot_distribution_diagnostics(
+                seasonal_difference,
+                stats_figures / f"{meter}_{variable}_distribucion_qq.png",
+                f"{meter} - {variable}: diferencia estacional observada",
+            )
             output_variable = "S" if variable == "S_medida" else variable
             destination = recent_columns if meter in recent_meters else value_columns
             destination[f"{meter}_{output_variable}"] = clean["contexto"]
@@ -130,6 +161,11 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
     metadata_path = layout.stage("02_limpieza", "auditoria") / "matriz_limpia.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     pd.DataFrame(descriptions).to_csv(layout.stage("02_limpieza", "estadistica_descriptiva") / "resumen_por_medidor.csv", index=False)
+    normality = pd.DataFrame(normality_rows)
+    normality.to_csv(layout.stage("02_limpieza", "estadistica_descriptiva") / "normalidad_inferencia.csv", index=False)
+    decision_counts = normality["decision_inferencial"].value_counts().to_dict() if len(normality) else {}
+    metadata["normality_decisions"] = {str(key): int(value) for key, value in decision_counts.items()}
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     if electrical_rows:
         pd.concat(electrical_rows, ignore_index=True).to_csv(
             layout.stage("02_limpieza", "csv") / "calidad_electrica.csv", index=False

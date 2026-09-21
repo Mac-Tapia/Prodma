@@ -33,6 +33,16 @@ modulos:
           - {tipo: articulo_indexado, idioma: pt, referencia: "Nunes et al. (2019), Valores anomalos e dados faltantes em estudos clinicos e experimentais", url: "https://doi.org/10.1590/1677-5449.190004"}
           - {tipo: tesis_maestria, idioma: en, referencia: "Ismagulov (2021), UPV/EHU", url: "http://hdl.handle.net/10810/52468"}
           - {tipo: tesis_doctoral, idioma: en, referencia: "Lotfipoor (2024), Heriot-Watt University", url: "http://hdl.handle.net/10399/5167"}
+      - id: LIM-003
+        decision: Evaluar normalidad sobre diferencias estacionales observadas y clasificar la inferencia como candidata parametrica o no parametrica.
+        codigo: src/prodma/limpieza/descriptive.py
+        prueba: tests/unit/test_cleaning_rules.py::test_normality_diagnostic_selects_parametric_only_when_all_checks_pass
+        artefacto: 02_limpieza/estadistica_descriptiva/normalidad_inferencia.csv
+        fuentes:
+          - {tipo: articulo_indexado, idioma: en, referencia: "Ghasemi y Zahediasl (2012), Normality Tests for Statistical Analysis", url: "https://doi.org/10.5812/ijem.3505"}
+          - {tipo: articulo_indexado, idioma: pt, referencia: "Nunes et al. (2019), Valores anomalos e dados faltantes em estudos clinicos e experimentais", url: "https://doi.org/10.1590/1677-5449.190004"}
+          - {tipo: tesis_maestria, idioma: en, referencia: "Farrugia (2020), KNN-based imputation of missing smart meter data, University of Malta", url: "https://www.um.edu.mt/library/oar/handle/123456789/98708"}
+          - {tipo: tesis_doctoral, idioma: en, referencia: "Hong (2010), Short Term Electric Load Forecasting, North Carolina State University", url: "https://repository.lib.ncsu.edu/items/c8f6d98e-3422-4a0b-9d5e-91cfeaa0de87"}
   "03_entrenamiento": {estado: pendiente_revision_cientifica, decisiones: []}
   "04_evaluacion": {estado: pendiente_revision_cientifica, decisiones: []}
   "05_prediccion": {estado: pendiente_revision_cientifica, decisiones: []}

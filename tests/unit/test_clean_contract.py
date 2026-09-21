@@ -50,6 +50,13 @@ def test_cleaning_stage_publishes_matrix_and_hash(tmp_path):
     quality = pd.read_parquet(result.artifacts["quality"])
     assert np.isnan(quality.loc[idx[1], "M1__P__objetivo"])
     assert (layout.stage("02_limpieza", "estadistica_descriptiva") / "resumen_por_medidor.csv").is_file()
+    normality = pd.read_csv(layout.stage("02_limpieza", "estadistica_descriptiva") / "normalidad_inferencia.csv")
+    assert {
+        "decision_inferencial", "serie_evaluada", "dagostino_p", "jarque_bera_p", "anderson_p",
+        "prueba_dos_modelos", "prueba_tres_o_mas_modelos",
+    } <= set(normality)
+    assert set(normality["serie_evaluada"]) == {"diferencia_estacional_observada"}
+    assert list((layout.stage("02_limpieza", "estadistica_descriptiva") / "figuras").glob("*_distribucion_qq.png"))
     assert (layout.stage("02_limpieza", "figuras") / "M1_P_crudo_limpio.png").stat().st_size > 0
 
 
