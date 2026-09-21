@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from prodma.artifacts import RunLayout
 from prodma.exogenas.catalog import build_exogenous_catalog
 from prodma.exogenas.validation import validate_exogenous_sources
+from prodma.exogenas.matrix import build_exogenous_matrices, publish_exogenous_matrices
 from prodma.limpieza.temporal import build_clean_variable
 from prodma.limpieza.descriptive import describe_variable, normality_diagnostics, plot_distribution_diagnostics
 from prodma.limpieza.electrical import ElectricalLimits, electrical_flags
@@ -148,13 +149,17 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
     recent = pd.concat(recent_columns, axis=1) if recent_columns else pd.DataFrame()
     quality = pd.concat(quality_columns, axis=1)
     exogenous_report = None
+    exogenous_artifacts: dict[str, str] = {}
     if config is not None and config.raw.get("exogenous", {}).get("sources"):
-        exogenous_report = validate_exogenous_sources(
-            build_exogenous_catalog(config), matrix.index, timezone=config.timezone
-        )
+        exogenous_catalog = build_exogenous_catalog(config)
+        exogenous_report = validate_exogenous_sources(exogenous_catalog, matrix.index, timezone=config.timezone)
         (layout.stage("02_limpieza", "auditoria") / "exogenas_validacion.json").write_text(
             json.dumps(exogenous_report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        exogenous_matrices = build_exogenous_matrices(
+            config, exogenous_catalog, matrix.index, config.raw.get("prediction", {}).get("planning_end")
+        )
+        exogenous_artifacts = publish_exogenous_matrices(exogenous_matrices, layout, demand=matrix)
     target = matrix_output_path(layout)
     matrix.to_parquet(target)
     recent_target = layout.stage("02_limpieza", "datos") / "matriz_medidores_recientes.parquet"
@@ -168,6 +173,7 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         "canonical_year": canonical_year, "recent_meters": len(recent_meters),
         "meters_without_data": len(meters_without_data),
         "exogenous_sources_validated": len(exogenous_report.items) if exogenous_report else 0,
+        **exogenous_artifacts,
     }
     metadata_path = layout.stage("02_limpieza", "auditoria") / "matriz_limpia.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
