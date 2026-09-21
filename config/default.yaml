@@ -16,6 +16,57 @@ cleaning:
   outlier_window: 672
   outlier_threshold: 6.0
 
+exogenous:
+  sources:
+    calendario_pe:
+      path: variables_externas/calendario/feriados_peru_2023_2036.csv
+      frequency: 1d
+      value_columns: [feriado, fin_semana, no_laborable]
+      availability: known_future
+      future_policy: calendar
+      source_url: https://www.gob.pe/feriados
+      enabled: true
+    temperatura_ica:
+      path: variables_externas/temperatura/temperatura_horaria_ica_centro_2023_2026.csv
+      frequency: 1h
+      value_columns: [temperatura_c]
+      availability: historical_only
+      future_policy: climatology
+      source_url: https://open-meteo.com/en/docs/historical-weather-api
+      enabled: true
+    pbi_bcrp:
+      path: variables_externas/economia/pbi_mensual_bcrp_2023_2026.csv
+      frequency: 1M
+      value_columns: [valor]
+      availability: publication_lag
+      future_policy: last_known
+      source_url: https://estadisticas.bcrp.gob.pe/estadisticas/series/mensuales/resultados/PN01773AM/html
+      enabled: true
+    poblacion_ica:
+      path: variables_externas/poblacion/poblacion_ica_2023_2026.csv
+      frequency: 1Y
+      value_columns: [poblacion]
+      availability: known_future
+      future_policy: official_projection
+      source_url: https://www.gob.pe/institucion/inei/informes-publicaciones/6894980
+      enabled: true
+    clientes_confirmados:
+      path: nuevosclientes/nuevosclientes.xlsx
+      frequency: 1Y
+      value_columns: [incremento_kw]
+      availability: scenario
+      future_policy: scenario_only
+      source_url: internal://electro-dunas/clientes-confirmados
+      enabled: false
+    produccion_regional:
+      path: variables_externas/produccion_regional/produccion_regional.csv
+      frequency: 1M
+      value_columns: [indice_produccion]
+      availability: scenario
+      future_policy: scenario_only
+      source_url: https://www.gob.pe/institucion/inei/informes-publicaciones/7567597
+      enabled: false
+
 training:
   prefilter_max_seconds: 300
   seed: 42
