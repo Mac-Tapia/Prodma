@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,15 @@ STAGE_CHILDREN: dict[str, tuple[str, ...]] = {
     "05_prediccion": ("pronosticos", "intervalos", "escenarios", "figuras", "entregables", "logs"),
 }
 STAGES = tuple(STAGE_CHILDREN)
+
+
+def sha256_file(path: Path | str) -> str:
+    """Identidad binaria reproducible de un artefacto publicado."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)

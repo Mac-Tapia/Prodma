@@ -283,11 +283,34 @@ def construir_parser() -> argparse.ArgumentParser:
     parser.add_argument('--timeout', type=int, default=7200,
                          help='Timeout por celda, en segundos (default 7200; la primera '
                               'lectura de datahistorica/ sin caché puede tardar).')
+    parser.add_argument('--run-id', default=None,
+                        help='Identificador de una corrida modular existente o nueva.')
+    parser.add_argument('--stage', choices=['03_entrenamiento'], default=None,
+                        help='Ejecuta una etapa modular en lugar del notebook legado.')
+    parser.add_argument('--models', default=None,
+                        help='Candidatos separados por coma para la etapa 03.')
+    parser.add_argument('--config', type=Path, default=RAIZ_PROYECTO / 'config' / 'default.yaml',
+                        help='Configuración YAML del pipeline modular.')
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = construir_parser().parse_args(argv)
+    if args.stage is not None:
+        if not args.run_id:
+            raise SystemExit('--run-id es obligatorio cuando se usa --stage')
+        from prodma.artifacts import RunLayout, RunLock
+        from prodma.config import load_config
+        from prodma.stages.training import run_training
+
+        config = load_config(args.config)
+        layout = RunLayout.create(config.output_root, args.run_id)
+        model_names = tuple(value.strip() for value in (args.models or '').split(',') if value.strip()) or None
+        with RunLock.acquire(layout.root):
+            result = run_training(config, layout, model_names=model_names)
+        print(f'Estado: {result.status}')
+        print(f'Resultados: {result.output}')
+        return 0 if result.status in {'SUCCESS', 'PARTIAL'} else 1
     args.overrides = parsear_overrides(args.sobrescribir)
     if args.reanudar is not None:
         if not args.reanudar.is_absolute():

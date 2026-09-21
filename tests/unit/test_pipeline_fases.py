@@ -3,7 +3,7 @@ from pathlib import Path
 import nbformat
 import pytest
 
-from prodma.pipeline import NOTEBOOK_DEFAULT, indice_hasta_fase, listar_fases
+from prodma.pipeline import NOTEBOOK_DEFAULT, construir_parser, indice_hasta_fase, listar_fases
 
 NOTEBOOK = nbformat.read(NOTEBOOK_DEFAULT, as_version=4)
 
@@ -50,6 +50,15 @@ def test_hasta_fase_inexistente_lanza_error_claro():
     fases = listar_fases(NOTEBOOK)
     with pytest.raises(SystemExit):
         indice_hasta_fase(NOTEBOOK, 999, fases)
+
+
+def test_cli_expone_etapa_modular_run_id_y_modelos():
+    args = construir_parser().parse_args([
+        '--run-id', 'run-1', '--stage', '03_entrenamiento', '--models', 'SeasonalNaive,Ridge'
+    ])
+    assert args.run_id == 'run-1'
+    assert args.stage == '03_entrenamiento'
+    assert args.models == 'SeasonalNaive,Ridge'
 
 
 # --- reanudación sin reentrenar (--reanudar / --set) -------------------------------------------
