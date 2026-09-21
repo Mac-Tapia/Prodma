@@ -10,6 +10,7 @@ from pathlib import Path
 from prodma.artifacts import RunLayout
 from prodma.config import PipelineConfig
 from prodma.ingesta.excel import ingestar_libro
+from prodma.exogenas.new_customers import ingest_new_customers, write_new_customer_audit
 from prodma.stages import StageResult
 
 
@@ -72,9 +73,24 @@ def run_ingestion(config: PipelineConfig, layout: RunLayout) -> StageResult:
     for path in files:
         rows.extend(ingestar_libro(path, parquet_dir, destino_auditoria=audit_dir, imprimir=lambda *_: None))
     successful = [row for row in rows if row["estado"] == "ok"]
+    new_customer_records: list[dict] = []
+    new_customer_dir = config.project_root / inputs.get("new_customers_dir", "nuevosclientes")
+    new_customer_files = sorted(new_customer_dir.glob("*nuevos*clientes*.xls*"))
+    if len(new_customer_files) > 1:
+        raise ValueError("Multiples archivos de nuevos clientes")
+    if new_customer_files:
+        customer_result = ingest_new_customers(new_customer_files[0])
+        customer_table_path = parquet_dir / "nuevos_clientes.parquet"
+        customer_result.table.to_parquet(customer_table_path, index=False)
+        customer_audit_path = write_new_customer_audit(customer_result, layout)
+        new_customer_records.append({
+            "path": str(customer_result.source_path), "sha256": customer_result.sha256,
+            "table": str(customer_table_path), "audit": str(customer_audit_path),
+        })
     catalog = {
         "inputs": [_serializable_record(record) for record in fingerprints],
         "sheets": rows,
+        "new_customers": new_customer_records,
     }
     catalog_path = layout.stage("01_ingesta") / "catalogo.json"
     catalog_path.write_text(json.dumps(catalog, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -87,5 +103,6 @@ def run_ingestion(config: PipelineConfig, layout: RunLayout) -> StageResult:
             "catalogo": str(catalog_path),
             "parquet": [row["path"] for row in successful],
             "auditoria": [str(audit_dir / f"{Path(row['path']).stem}.json") for row in successful],
+            "new_customers": new_customer_records,
         },
     )

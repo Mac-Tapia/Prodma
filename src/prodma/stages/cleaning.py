@@ -15,6 +15,7 @@ from prodma.artifacts import RunLayout
 from prodma.exogenas.catalog import build_exogenous_catalog
 from prodma.exogenas.validation import validate_exogenous_sources
 from prodma.exogenas.matrix import build_exogenous_matrices, publish_exogenous_matrices
+from prodma.exogenas.new_customers import ingest_new_customers, publish_new_customer_scenario
 from prodma.limpieza.temporal import build_clean_variable
 from prodma.limpieza.descriptive import describe_variable, normality_diagnostics, plot_distribution_diagnostics
 from prodma.limpieza.electrical import ElectricalLimits, electrical_flags
@@ -160,6 +161,15 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
             config, exogenous_catalog, matrix.index, config.raw.get("prediction", {}).get("planning_end")
         )
         exogenous_artifacts = publish_exogenous_matrices(exogenous_matrices, layout, demand=matrix)
+    customer_artifacts: dict[str, str] = {}
+    if config is not None:
+        customer_dir = config.project_root / config.raw.get("inputs", {}).get("new_customers_dir", "nuevosclientes")
+        customer_files = sorted(customer_dir.glob("*nuevos*clientes*.xls*"))
+        if len(customer_files) > 1:
+            raise ValueError("Multiples archivos de nuevos clientes")
+        if customer_files:
+            customer_result = ingest_new_customers(customer_files[0], known_meters=set(canonical_meters))
+            customer_artifacts = publish_new_customer_scenario(customer_result, layout)
     target = matrix_output_path(layout)
     matrix.to_parquet(target)
     recent_target = layout.stage("02_limpieza", "datos") / "matriz_medidores_recientes.parquet"
@@ -174,6 +184,7 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         "meters_without_data": len(meters_without_data),
         "exogenous_sources_validated": len(exogenous_report.items) if exogenous_report else 0,
         **exogenous_artifacts,
+        **customer_artifacts,
     }
     metadata_path = layout.stage("02_limpieza", "auditoria") / "matriz_limpia.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
