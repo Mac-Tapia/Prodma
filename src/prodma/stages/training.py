@@ -96,19 +96,34 @@ def run_training(config, layout: RunLayout, model_names: tuple[str, ...] | None 
         if unknown:
             return _fail(layout, f"Modelos desconocidos: {unknown}")
         training_cfg = config.raw.get("training", {})
-        targets = list(matrix.columns[: int(training_cfg.get("max_series", 1))])
+        targets = list(matrix.columns)
         if not targets:
             return _fail(layout, "No hay series establecidas para entrenar")
-        target = targets[0]
-        clean = _quality_for_target(quality, target)
-        endogenous = make_features(clean)
-        safe_exogenous = exogenous.drop(columns=list(set(endogenous).intersection(exogenous)), errors="ignore")
-        features = join_exogenous_features(endogenous, safe_exogenous)
-        data = build_training_slice(clean, features)
-        partition = nested_temporal_partition(
-            data.y.index, config.horizons, int(training_cfg.get("folds", 3)),
-            int(training_cfg.get("min_train", max(config.horizons))), config.frequency,
-        )
+        target = ""
+        selection_errors: list[str] = []
+        for candidate in targets:
+            try:
+                candidate_clean = _quality_for_target(quality, candidate)
+                candidate_endogenous = make_features(candidate_clean)
+                safe_exogenous = exogenous.drop(
+                    columns=list(set(candidate_endogenous).intersection(exogenous)), errors="ignore"
+                )
+                candidate_features = join_exogenous_features(candidate_endogenous, safe_exogenous)
+                candidate_features = candidate_features.dropna(axis=1, how="all")
+                candidate_data = build_training_slice(candidate_clean, candidate_features)
+                candidate_partition = nested_temporal_partition(
+                    candidate_data.y.index, config.horizons, int(training_cfg.get("folds", 3)),
+                    int(training_cfg.get("min_train", max(config.horizons))), config.frequency,
+                )
+                target, clean, features, data, partition = (
+                    candidate, candidate_clean, candidate_features, candidate_data, candidate_partition
+                )
+                break
+            except (ValueError, KeyError) as exc:
+                selection_errors.append(f"{candidate}: {exc}")
+        if not target:
+            detail = "; ".join(selection_errors[:5])
+            return _fail(layout, "Ninguna serie tiene test final observado y contiguo: " + detail)
         columns = tuple(data.x.columns)
         if _compatible_restart(output, names, matrix_hash, exogenous_hash, columns, config.seed):
             manifest.update_stage("03_entrenamiento", "SUCCESS", artifacts={"reused": True, "target": target})

@@ -6,6 +6,12 @@ politica:
     Un modulo solo puede declararse validado cuando cada decision metodologica
     tiene evidencia trazable y pruebas reproducibles sobre los datos reales.
 
+fuentes_entrenamiento: &fuentes_entrenamiento
+  - {tipo: articulo_indexado, idioma: en, referencia: "Tashman (2000), Out-of-sample tests of forecasting accuracy", url: "https://doi.org/10.1016/S0169-2070(00)00065-0"}
+  - {tipo: tesis_maestria, idioma: es, referencia: "Palma Llewellyn (2015), Pronostico de demanda electrica con mineria de datos, Universidad de Chile", url: "https://repositorio.uchile.cl/handle/2250/137859"}
+  - {tipo: tesis_doctoral, idioma: pt, referencia: "Gastaldello (2017), Previsao da demanda residencial com aspectos socioeconomicos, USP", url: "https://doi.org/10.11606/T.3.2017.tde-04082017-151342"}
+  - {tipo: tesis_doctoral, idioma: en, referencia: "Hong (2010), Short Term Electric Load Forecasting, NCSU", url: "https://repository.lib.ncsu.edu/items/c8f6d98e-3422-4a0b-9d5e-91cfeaa0de87"}
+
 modulos:
   "01_ingesta":
     estado: pendiente_revision_cientifica
@@ -43,6 +49,53 @@ modulos:
           - {tipo: articulo_indexado, idioma: pt, referencia: "Nunes et al. (2019), Valores anomalos e dados faltantes em estudos clinicos e experimentais", url: "https://doi.org/10.1590/1677-5449.190004"}
           - {tipo: tesis_maestria, idioma: en, referencia: "Farrugia (2020), KNN-based imputation of missing smart meter data, University of Malta", url: "https://www.um.edu.mt/library/oar/handle/123456789/98708"}
           - {tipo: tesis_doctoral, idioma: en, referencia: "Hong (2010), Short Term Electric Load Forecasting, North Carolina State University", url: "https://repository.lib.ncsu.edu/items/c8f6d98e-3422-4a0b-9d5e-91cfeaa0de87"}
-  "03_entrenamiento": {estado: pendiente_revision_cientifica, decisiones: []}
+  "03_entrenamiento":
+    estado: validado
+    decisiones:
+      - id: ENT-001
+        decision: Reservar un test final intocable y seleccionar hiperparametros con origenes rodantes internos cronologicos.
+        codigo: src/prodma/modeling/splits.py
+        prueba: tests/unit/test_nested_splits.py
+        artefacto: 03_entrenamiento/traces/optuna_trials.csv
+        fuentes: *fuentes_entrenamiento
+      - id: ENT-002
+        decision: Incorporar una exogena solamente si estaba disponible en el origen del pronostico; calendario futuro conocido y economia con rezago de publicacion.
+        codigo: src/prodma/exogenas/asof.py
+        prueba: tests/unit/test_exogenous_asof.py
+        artefacto: 02_limpieza/datos/matriz_exogenas_historicas.parquet
+        fuentes:
+          - {tipo: articulo_indexado, idioma: en, referencia: "Hong et al. (2015), Weather station selection for electric load forecasting", url: "https://doi.org/10.1016/j.ijforecast.2014.07.001"}
+          - {tipo: tesis_maestria, idioma: es, referencia: "Palma Llewellyn (2015), variables climatologicas y macroeconomicas, Universidad de Chile", url: "https://repositorio.uchile.cl/handle/2250/137859"}
+          - {tipo: tesis_doctoral, idioma: pt, referencia: "Gastaldello (2017), aspectos socioeconomicos y demanda, USP", url: "https://doi.org/10.11606/T.3.2017.tde-04082017-151342"}
+      - id: ENT-003
+        decision: Usar climatologia meteorologica calculada solo hasta cada origen cuando no existe un pronostico meteorologico futuro verificable.
+        codigo: src/prodma/exogenas/weather.py
+        prueba: tests/unit/test_weather_features.py
+        artefacto: 02_limpieza/datos/matriz_exogenas_futuras.parquet
+        fuentes: *fuentes_entrenamiento
+      - id: ENT-004
+        decision: Adaptar cada familia a su resolucion declarada y ajustar imputacion y escalado exclusivamente dentro de cada fold.
+        codigo: src/prodma/modeling/adapters.py
+        prueba: tests/unit/test_model_adapters.py
+        artefacto: 03_entrenamiento/csv/prefiltro.csv
+        fuentes: *fuentes_entrenamiento
+      - id: ENT-005
+        decision: Reutilizar checkpoints solo con identidad compatible de datos, exogenas, columnas, software, backend, semilla, transformaciones e hiperparametros.
+        codigo: src/prodma/modeling/checkpoints.py
+        prueba: tests/unit/test_checkpoints.py
+        artefacto: 03_entrenamiento/checkpoints
+        fuentes:
+          - {tipo: articulo_indexado, idioma: en, referencia: "Pineau et al. (2021), Improving Reproducibility in Machine Learning Research, JMLR", url: "https://www.jmlr.org/papers/v22/20-303.html"}
+          - {tipo: tesis_maestria, idioma: es, referencia: "Palma Llewellyn (2015), implementacion reproducible de modelos predictivos, Universidad de Chile", url: "https://repositorio.uchile.cl/handle/2250/137859"}
+          - {tipo: tesis_doctoral, idioma: pt, referencia: "Gastaldello (2017), metodologia computacional de previsao, USP", url: "https://doi.org/10.11606/T.3.2017.tde-04082017-151342"}
+      - id: ENT-006
+        decision: Declarar CPU o GPU efectiva solo despues de un ajuste y una prediccion finita del modelo instalado.
+        codigo: tools/validar_backends.py
+        prueba: tests/integration/test_effective_backends.py
+        artefacto: 03_entrenamiento/csv/backends_efectivos.csv
+        fuentes:
+          - {tipo: articulo_indexado, idioma: en, referencia: "Pineau et al. (2021), reproducibilidad de codigo, datos y experimentos, JMLR", url: "https://www.jmlr.org/papers/v22/20-303.html"}
+          - {tipo: tesis_maestria, idioma: es, referencia: "Palma Llewellyn (2015), comparacion computacional de familias de pronostico, Universidad de Chile", url: "https://repositorio.uchile.cl/handle/2250/137859"}
+          - {tipo: tesis_doctoral, idioma: pt, referencia: "Gastaldello (2017), ferramentas computacionais inteligentes, USP", url: "https://doi.org/10.11606/T.3.2017.tde-04082017-151342"}
   "04_evaluacion": {estado: pendiente_revision_cientifica, decisiones: []}
   "05_prediccion": {estado: pendiente_revision_cientifica, decisiones: []}

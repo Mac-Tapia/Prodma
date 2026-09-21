@@ -3,9 +3,11 @@ import hashlib
 
 import numpy as np
 import pandas as pd
+import joblib
 
 from prodma.artifacts import ManifestStore, RunLayout
 from prodma.config import load_config
+from prodma.modeling.features import join_exogenous_features, make_features
 from prodma.stages.training import run_training
 
 
@@ -32,7 +34,7 @@ def test_training_stage_writes_isolated_recoverable_artifacts(tmp_path):
         "M1__P__es_observado": True,
         "M1__P__es_imputado": False,
     }, index=index)
-    exogenous = pd.DataFrame({"feriado": 0, "temperatura_c": 24.0}, index=index)
+    exogenous = pd.DataFrame({"feriado": 0, "temperatura_c": 24.0, "sin_vintage": np.nan}, index=index)
     data_dir = layout.stage("02_limpieza", "datos")
     matrix_path = data_dir / "matriz_limpia.parquet"
     quality_path = data_dir / "matriz_calidad.parquet"
@@ -52,6 +54,19 @@ def test_training_stage_writes_isolated_recoverable_artifacts(tmp_path):
     assert (result.output / "csv/entrenamientos.csv").is_file()
     assert len(list((result.output / "modelos").glob("*.joblib"))) == 2
     assert len(list((result.output / "checkpoints").glob("*.joblib"))) == 2
+    envelope = joblib.load(result.output / "checkpoints" / "Ridge.joblib")
+    assert "sin_vintage" not in envelope["key"].columns
+    clean = pd.DataFrame({key.split("__")[-1]: value for key, value in quality.items()}, index=index)
+    features = join_exogenous_features(
+        make_features(clean), exogenous.drop(columns=["feriado"])
+    ).dropna(axis=1, how="all")
+    features["feriado"] = exogenous["feriado"]
+    features = features.loc[:, envelope["key"].columns]
+    exported = joblib.load(result.output / "modelos" / "Ridge.joblib")
+    np.testing.assert_allclose(
+        envelope["payload"]["model"].predict(features.iloc[-10:]),
+        exported.predict(features.iloc[-10:]),
+    )
     assert list((result.output / "times").glob("*.csv"))
     assert list((result.output / "traces").glob("*.csv"))
     assert ManifestStore(layout).read()["stages"]["03_entrenamiento"]["status"] == "SUCCESS"
@@ -72,3 +87,42 @@ def test_training_stage_rejects_changed_stage_two_artifact(tmp_path):
 
     assert result.status == "FAILED"
     assert "hash" in result.warnings[0].lower()
+
+
+def test_training_stage_skips_target_without_contiguous_observed_test(tmp_path):
+    base = load_config(ROOT / "config/default.yaml")
+    raw = dict(base.raw)
+    raw["training"] = {"folds": 1, "min_train": 150, "n_trials": 1}
+    config = replace(base, output_root=tmp_path, horizons=(48,), raw=raw)
+    layout = RunLayout.create(tmp_path, "run-select")
+    index = pd.date_range("2025-01-01", periods=400, freq="15min", name="Fecha")
+    matrix = pd.DataFrame({"A_P": np.arange(400.0), "B_P": np.arange(400.0)}, index=index)
+    columns = {}
+    for meter in ("A", "B"):
+        observed = pd.Series(True, index=index)
+        if meter == "A":
+            observed.iloc[-10] = False
+        for field, values in {
+            "observado": matrix[f"{meter}_P"].where(observed), "limpio": matrix[f"{meter}_P"],
+            "contexto": matrix[f"{meter}_P"], "es_observado": observed, "es_imputado": ~observed,
+        }.items():
+            columns[f"{meter}__P__{field}"] = values
+    quality = pd.DataFrame(columns, index=index)
+    exogenous = pd.DataFrame({"feriado": 0}, index=index)
+    data_dir = layout.stage("02_limpieza", "datos")
+    paths = {name: data_dir / filename for name, filename in {
+        "matrix": "matriz_limpia.parquet", "quality": "matriz_calidad.parquet",
+        "exogenous_historical": "matriz_exogenas_historicas.parquet",
+    }.items()}
+    matrix.to_parquet(paths["matrix"])
+    quality.to_parquet(paths["quality"])
+    exogenous.to_parquet(paths["exogenous_historical"])
+    ManifestStore(layout).update_stage("02_limpieza", "SUCCESS", artifacts={
+        **{key: str(value) for key, value in paths.items()}, "sha256": _sha(paths["matrix"]),
+        "exogenous_sha256": _sha(paths["exogenous_historical"]),
+    })
+
+    result = run_training(config, layout, model_names=("Ridge",))
+
+    assert result.status == "SUCCESS"
+    assert result.artifacts["target"] == "B_P"

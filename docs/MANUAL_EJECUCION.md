@@ -319,17 +319,36 @@ error una carpeta vieja y confundir una figura ya corregida con una desactualiza
 ruta exacta (y el estado) de la corrida más reciente — revisa ese archivo antes de abrir
 una figura o tabla si no estás seguro de cuál carpeta es la actual.
 
+### Etapa 3 modular: entrenamiento aislado y reanudable
+
+La ruta modular consume exclusivamente los artefactos publicados por `02_limpieza` y
+verifica sus SHA-256 antes de entrenar. El test final queda reservado y no participa en
+prefiltro, selección ni ajuste. Ejecución manual:
+
+```powershell
+.\.venv\Scripts\python.exe tools\validar_backends.py --output resultados\<run-id>\03_entrenamiento\csv\backends_efectivos.csv
+.\.venv\Scripts\python.exe -m prodma.pipeline --run-id <run-id> --stage 03_entrenamiento --models SeasonalNaive,Ridge
+.\.venv\Scripts\python.exe tools\validar_prefiltro_modelos.py --run-id <run-id> --output resultados\<run-id>\03_entrenamiento\csv\prefiltro_todos_candidatos.csv --timeout 30
+```
+
+La etapa rechaza una etapa 2 sin estado `SUCCESS` o cuyos archivos ya no coincidan con
+el manifiesto. Un segundo comando idéntico reutiliza checkpoints solamente si coinciden
+datos, exógenas, columnas, semilla y modelos. Las salidas se separan en `modelos/`,
+`checkpoints/`, `figuras/`, `csv/`, `times/`, `traces/` y `logs/`; el estado puede ser
+`SUCCESS`, `PARTIAL` o `FAILED`.
+
 ---
 
 ## Limitaciones que hay que tener presentes (no ocultarlas al entregar)
 
-- **La CLI (`python -m prodma.pipeline`) envuelve el notebook, no lo reemplaza**: las
+- **La ruta CLI legada sin `--stage` envuelve el notebook, no lo reemplaza**: las
   "fases" son las 26 secciones del propio notebook y buena parte de la lógica de negocio
   sigue viviendo ahí. Ya están en `src/prodma/` la reanudación (`reanudar.py`), el
   pronóstico recursivo (`recursivo.py`), las guardas de sanidad (`sanidad.py`) y la
-  transformación del target (`transformaciones.py`); no hay todavía un manifiesto con
-  reanudación fina por etapa como el del plan de arquitectura completo. Lo que se
-  reanuda de verdad es lo descrito en «Reanudar una corrida sin reentrenar» (Fase 4).
+  transformación del target (`transformaciones.py`). La ruta modular ya dispone de
+  manifiesto y reanudación estricta para las etapas 1 a 3; las etapas 4 y 5 continúan
+  pendientes de esa migración. La reanudación del notebook legado sigue siendo la
+  descrita en «Reanudar una corrida sin reentrenar» (Fase 4).
 - **Pronóstico sin reentrenar con el 100 % del histórico.** Con `--reanudar`, los modelos
   se entrenaron con el 80 % cronológico más antiguo de cada serie y los árboles no
   extrapolan por encima de lo visto al entrenar. La recursión ML a 15 min **pierde el
