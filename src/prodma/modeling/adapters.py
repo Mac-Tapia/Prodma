@@ -36,6 +36,16 @@ class ForecastAdapter:
     def fit(self, training: TrainingSlice) -> "ForecastAdapter":
         positions = np.asarray(training.train_positions)
         if self.spec.family == "sklearn":
+            registered_sklearn = {"Ridge", "RandomForest", "XGBoost", "LightGBM", "CatBoost", "MLP"}
+            if self.spec.name in registered_sklearn:
+                from sklearn.impute import SimpleImputer
+                from sklearn.pipeline import make_pipeline
+                from sklearn.preprocessing import StandardScaler
+                steps = [SimpleImputer(strategy="median")]
+                if self.spec.name in {"Ridge", "MLP"}:
+                    steps.append(StandardScaler())
+                steps.append(self.model)
+                self.model = make_pipeline(*steps)
             self.model.fit(training.x.iloc[positions], training.y.iloc[positions])
         else:
             y = training.y.iloc[positions]
