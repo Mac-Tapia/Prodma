@@ -12,6 +12,7 @@ class ModelSpec:
     resolution: str
     supports_exogenous: bool
     backend: str
+    family: str = "sklearn"
 
 
 def _sklearn_factory(name: str):
@@ -38,10 +39,10 @@ def _sklearn_factory(name: str):
     return create
 
 
-def _forecast_factory(name: str):
+def _forecast_factory(name: str, seasonal_periods: int = 7):
     def create(seed: int):
         from prodma.forecast_models import create_forecaster
-        kwargs = {"seasonal_periods": 7}
+        kwargs = {"seasonal_periods": seasonal_periods}
         if name == "LSTM":
             kwargs.update(device="auto", random_state=seed)
         return create_forecaster(name, **kwargs)
@@ -53,7 +54,10 @@ def model_registry() -> dict[str, ModelSpec]:
         name: ModelSpec(name, _sklearn_factory(name), "15min", False, "auto" if name in {"XGBoost", "LightGBM", "CatBoost"} else "cpu")
         for name in ("Ridge", "RandomForest", "XGBoost", "LightGBM", "CatBoost", "MLP")
     }
-    result["SeasonalNaive"] = ModelSpec("SeasonalNaive", _forecast_factory("SeasonalNaive"), "1d", False, "cpu")
+    result["SeasonalNaive"] = ModelSpec(
+        "SeasonalNaive", _forecast_factory("SeasonalNaive", seasonal_periods=672), "15min", False, "cpu", "forecaster"
+    )
     for name in ("ARIMA", "SARIMA", "SARIMAX", "HoltWinters", "Prophet", "LSTM"):
-        result[name] = ModelSpec(name, _forecast_factory(name), "1h" if name == "LSTM" else "1d", name == "SARIMAX", "auto" if name == "LSTM" else "cpu")
+        result[name] = ModelSpec(name, _forecast_factory(name), "1h" if name == "LSTM" else "1d",
+                                 name == "SARIMAX", "auto" if name == "LSTM" else "cpu", "forecaster")
     return result
