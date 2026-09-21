@@ -44,6 +44,14 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         {row["medidor"] for row in rows if row.get("anio") == canonical_year}
         if canonical_year is not None else {row["medidor"] for row in rows}
     )
+    years_by_meter = {
+        meter: sorted({int(row["anio"]) for row in rows if row["medidor"] == meter and row.get("anio") is not None})
+        for meter in canonical_meters
+    }
+    recent_meters = {
+        meter for meter, meter_years in years_by_meter.items()
+        if canonical_year is not None and meter_years == [canonical_year]
+    }
     by_meter: dict[str, list[pd.DataFrame]] = {}
     for row in rows:
         if row["medidor"] in canonical_meters:
@@ -55,11 +63,17 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
     weekly_lag = int(cleaning_cfg.get("weekly_lag", 672))
     quality_columns: dict[str, pd.Series] = {}
     value_columns: dict[str, pd.Series] = {}
+    recent_columns: dict[str, pd.Series] = {}
+    meters_without_data: list[dict] = []
     descriptions: list[dict] = []
     electrical_rows: list[pd.DataFrame] = []
     for meter, parts in sorted(by_meter.items()):
         raw = resolver_duplicados(pd.concat(parts).sort_index())
         raw = raw.reindex(pd.date_range(raw.index.min(), raw.index.max(), freq="15min", name="Fecha"))
+        valid_pq = sum(int(raw[column].notna().sum()) for column in ("P", "Q") if column in raw)
+        if valid_pq == 0:
+            meters_without_data.append({"medidor": meter, "motivo": "sin_mediciones_P_Q"})
+            continue
         flags = electrical_flags(raw, ElectricalLimits())
         if len(flags):
             flags = flags.assign(medidor=meter).reset_index()
@@ -83,7 +97,8 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
             clean.loc[clean["es_observado"], "contexto"] = clean.loc[clean["es_observado"], "limpio"]
             descriptions.append({"medidor": meter, "variable": variable, **describe_variable(clean)})
             output_variable = "S" if variable == "S_medida" else variable
-            value_columns[f"{meter}_{output_variable}"] = clean["contexto"]
+            destination = recent_columns if meter in recent_meters else value_columns
+            destination[f"{meter}_{output_variable}"] = clean["contexto"]
             figure, axis = plt.subplots(figsize=(12, 4))
             axis.plot(clean.index, clean["observado"].to_numpy(), color="lightgray", linewidth=0.7, label="observado")
             axis.plot(clean.index, clean["limpio"].to_numpy(), color="tab:blue", linewidth=0.8, label="limpio")
@@ -94,19 +109,23 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
             plt.close(figure)
             for field in clean:
                 quality_columns[f"{meter}__{variable}__{field}"] = clean[field]
-    if not value_columns:
+    if not value_columns and not recent_columns:
         raise ValueError("La ingesta no contiene series limpiables")
-    matrix = pd.concat(value_columns, axis=1)
+    matrix = pd.concat(value_columns, axis=1) if value_columns else pd.DataFrame()
+    recent = pd.concat(recent_columns, axis=1) if recent_columns else pd.DataFrame()
     quality = pd.concat(quality_columns, axis=1)
     target = matrix_output_path(layout)
     matrix.to_parquet(target)
+    recent_target = layout.stage("02_limpieza", "datos") / "matriz_medidores_recientes.parquet"
+    recent.to_parquet(recent_target)
     quality_target = layout.stage("02_limpieza", "datos") / "matriz_calidad.parquet"
     quality.to_parquet(quality_target)
     digest = _sha256(target)
     metadata = {
-        "matrix": str(target), "quality": str(quality_target), "sha256": digest,
+        "matrix": str(target), "recent": str(recent_target), "quality": str(quality_target), "sha256": digest,
         "rows": len(matrix), "columns": len(matrix.columns), "meters": len(by_meter),
-        "canonical_year": canonical_year,
+        "canonical_year": canonical_year, "recent_meters": len(recent_meters),
+        "meters_without_data": len(meters_without_data),
     }
     metadata_path = layout.stage("02_limpieza", "auditoria") / "matriz_limpia.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -115,4 +134,10 @@ def run_cleaning(config, layout: RunLayout) -> StageResult:
         pd.concat(electrical_rows, ignore_index=True).to_csv(
             layout.stage("02_limpieza", "csv") / "calidad_electrica.csv", index=False
         )
+    pd.DataFrame(meters_without_data, columns=["medidor", "motivo"]).to_csv(
+        layout.stage("02_limpieza", "csv") / "medidores_sin_datos.csv", index=False
+    )
+    pd.DataFrame({"medidor": sorted(recent_meters), "anio_incorporacion": canonical_year}).to_csv(
+        layout.stage("02_limpieza", "csv") / "medidores_recientes.csv", index=False
+    )
     return StageResult("02_limpieza", "SUCCESS", layout.stage("02_limpieza"), metadata)

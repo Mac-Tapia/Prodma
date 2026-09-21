@@ -6,6 +6,12 @@ Construir un dataset de demanda de 15 minutos completo para analisis y
 pronostico, preservando las mediciones originales, sin eliminar atipicos y sin
 presentar valores estimados como observaciones reales.
 
+Toda decision adoptada debe registrarse en `docs/evidencia_cientifica.yaml` con,
+como minimo, un articulo indexado, una tesis de maestria y una tesis doctoral,
+fuentes en dos idiomas, el codigo, la prueba automatizada y el artefacto que la
+demuestra. Una referencia bibliografica no sustituye la validacion sobre los
+datos reales del proyecto.
+
 La limpieza no consistira en aplicar todos los algoritmos disponibles. Cada
 serie y cada hueco recibiran el metodo que demuestre menor error en una
 validacion con datos conocidos ocultados artificialmente.

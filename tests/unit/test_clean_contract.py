@@ -59,12 +59,19 @@ def test_latest_year_defines_canonical_meter_catalog(tmp_path):
     stale.write_bytes(b"stale")
     idx = pd.date_range("2025-01-01", periods=2, freq="15min", name="Fecha")
     old = layout.stage("01_ingesta", "parquet") / "old.parquet"
+    established_old = layout.stage("01_ingesta", "parquet") / "established_old.parquet"
+    established_new = layout.stage("01_ingesta", "parquet") / "established_new.parquet"
     current = layout.stage("01_ingesta", "parquet") / "current.parquet"
     pd.DataFrame({"P": [1.0, 2.0], "Q": [3.0, 4.0]}, index=idx).to_parquet(old)
+    pd.DataFrame({"P": [1.0, 2.0], "Q": [3.0, 4.0], "S_medida": [4.0, 5.0]}, index=idx).to_parquet(established_old)
+    idx_new = pd.date_range("2026-01-01", periods=2, freq="15min", name="Fecha")
+    pd.DataFrame({"P": [2.0, 3.0], "Q": [4.0, 5.0], "S_medida": [5.0, 6.0]}, index=idx_new).to_parquet(established_new)
     pd.DataFrame({"P": [5.0, 6.0], "Q": [7.0, 8.0], "S_medida": [9.0, 10.0]}, index=idx).to_parquet(current)
     catalog = {"sheets": [
         {"estado": "ok", "anio": 2025, "medidor": "RETIRADO", "path": str(old)},
-        {"estado": "ok", "anio": 2026, "medidor": "ACTUAL", "path": str(current)},
+        {"estado": "ok", "anio": 2025, "medidor": "ACTUAL", "path": str(established_old)},
+        {"estado": "ok", "anio": 2026, "medidor": "ACTUAL", "path": str(established_new)},
+        {"estado": "ok", "anio": 2026, "medidor": "NUEVO", "path": str(current)},
     ]}
     (layout.stage("01_ingesta") / "catalogo.json").write_text(json.dumps(catalog), encoding="utf-8")
 
@@ -73,4 +80,7 @@ def test_latest_year_defines_canonical_meter_catalog(tmp_path):
 
     assert list(matrix.columns) == ["ACTUAL_P", "ACTUAL_Q", "ACTUAL_S"]
     assert not any("RETIRADO" in column for column in matrix.columns)
+    recent = pd.read_parquet(result.artifacts["recent"])
+    assert list(recent.columns) == ["NUEVO_P", "NUEVO_Q", "NUEVO_S"]
+    assert recent.index.min() == idx.min()
     assert not stale.exists()

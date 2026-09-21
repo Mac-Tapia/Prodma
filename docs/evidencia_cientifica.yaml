@@ -1,0 +1,38 @@
+version: 1
+politica:
+  tipos_requeridos: [articulo_indexado, tesis_maestria, tesis_doctoral]
+  idiomas_minimos: 2
+  regla: >-
+    Un modulo solo puede declararse validado cuando cada decision metodologica
+    tiene evidencia trazable y pruebas reproducibles sobre los datos reales.
+
+modulos:
+  "01_ingesta":
+    estado: pendiente_revision_cientifica
+    decisiones: []
+  "02_limpieza":
+    estado: validado
+    decisiones:
+      - id: LIM-001
+        decision: Aislar medidores recientes y no fabricar historia anterior a su alta.
+        codigo: src/prodma/stages/cleaning.py
+        prueba: tests/unit/test_clean_contract.py::test_latest_year_defines_canonical_meter_catalog
+        artefacto: 02_limpieza/datos/matriz_medidores_recientes.parquet
+        fuentes:
+          - {tipo: articulo_indexado, idioma: en, referencia: "Wang, Tsai y Lin (2021), Expert Systems with Applications 170, 114743", url: "https://doi.org/10.1016/j.eswa.2021.114743"}
+          - {tipo: articulo_indexado, idioma: pt, referencia: "Nunes et al. (2019), Valores anomalos e dados faltantes em estudos clinicos e experimentais", url: "https://doi.org/10.1590/1677-5449.190004"}
+          - {tipo: tesis_maestria, idioma: en, referencia: "Ismagulov (2021), UPV/EHU", url: "http://hdl.handle.net/10810/52468"}
+          - {tipo: tesis_doctoral, idioma: en, referencia: "Lotfipoor (2024), Heriot-Watt University", url: "http://hdl.handle.net/10399/5167"}
+      - id: LIM-002
+        decision: Conservar atipicos en la capa observada y separar dato observado de dato estimado.
+        codigo: src/prodma/stages/cleaning.py
+        prueba: tests/unit/test_cleaning_rules.py
+        artefacto: 02_limpieza/datos/matriz_calidad.parquet
+        fuentes:
+          - {tipo: articulo_indexado, idioma: en, referencia: "Wang, Tsai y Lin (2021), Expert Systems with Applications 170, 114743", url: "https://doi.org/10.1016/j.eswa.2021.114743"}
+          - {tipo: articulo_indexado, idioma: pt, referencia: "Nunes et al. (2019), Valores anomalos e dados faltantes em estudos clinicos e experimentais", url: "https://doi.org/10.1590/1677-5449.190004"}
+          - {tipo: tesis_maestria, idioma: en, referencia: "Ismagulov (2021), UPV/EHU", url: "http://hdl.handle.net/10810/52468"}
+          - {tipo: tesis_doctoral, idioma: en, referencia: "Lotfipoor (2024), Heriot-Watt University", url: "http://hdl.handle.net/10399/5167"}
+  "03_entrenamiento": {estado: pendiente_revision_cientifica, decisiones: []}
+  "04_evaluacion": {estado: pendiente_revision_cientifica, decisiones: []}
+  "05_prediccion": {estado: pendiente_revision_cientifica, decisiones: []}
