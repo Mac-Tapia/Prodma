@@ -141,7 +141,8 @@ def expandir_calendario_a_15min(calendario: pd.DataFrame, fecha_inicio: str, fec
 
 
 def construir_climatologia_mensual_horaria(temperatura: pd.DataFrame,
-                                            columna_valor: str = 'temperatura_c') -> pd.Series:
+                                            columna_valor: str = 'temperatura_c',
+                                            origen: pd.Timestamp | None = None) -> pd.Series:
     """Climatologia (mes, hora) -> mediana de temperatura, sobre observaciones HORARIAS
     reales (no usar la version interpolada a 15 min: solo agregaria ruido de la
     interpolacion sin aportar informacion nueva a una climatologia por hora).
@@ -154,6 +155,10 @@ def construir_climatologia_mensual_horaria(temperatura: pd.DataFrame,
     """
     t = temperatura.copy()
     t['fecha_hora'] = pd.to_datetime(t['fecha_hora'])
+    if origen is not None:
+        t = t.loc[t['fecha_hora'] <= pd.Timestamp(origen)]
+    if t.empty:
+        raise ValueError('no hay temperatura disponible antes del origen')
     return t.groupby([t['fecha_hora'].dt.month, t['fecha_hora'].dt.hour])[columna_valor].median()
 
 
