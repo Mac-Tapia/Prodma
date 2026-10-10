@@ -8,6 +8,8 @@ __pycache__/
 .claude/
 .pytest_cache/
 .vscode/codex-terminal-bridge/
+.worktrees/
+.superpowers/
 
 # Salidas generadas por cada ejecución del pipeline (reproducibles, no versionadas)
 resultados/*
