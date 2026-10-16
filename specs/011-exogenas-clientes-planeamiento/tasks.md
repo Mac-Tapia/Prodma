@@ -13,9 +13,9 @@ Cada tarea termina con pruebas focalizadas y un commit independiente.
 - [x] T08 - Clientes realizados y escenarios confirmados separados (S011-FR-001, S011-FR-008).
 - [x] T09 - Matrices exógenas reconciliadas con estados y procedencia (S011-FR-004, S011-FR-014).
 - [ ] T10 - Exógenas concatenadas en matriz candidata con ablación pareada (S011-FR-009, S011-FR-010).
-- [ ] T11 - Entrenamiento de todas las series elegibles con estados terminales (S011-FR-011, S011-FR-014).
-- [ ] T12 - Compatibilidad modelo-feature y backend efectivo (S011-FR-010, S011-FR-012).
-- [ ] T13 - Cobertura de los 13 modelos con búsqueda justa (S011-FR-011, S011-FR-012).
+- [x] T11 - Entrenamiento de todas las series elegibles con estados terminales (S011-FR-011, S011-FR-014).
+- [x] T12 - Compatibilidad modelo-feature y backend efectivo (S011-FR-010, S011-FR-012).
+- [x] T13 - Cobertura de los 13 modelos con búsqueda justa (S011-FR-011, S011-FR-012).
 - [ ] T14 - Intervalos calibrados y cobertura condicional (S011-FR-013).
 - [ ] T15 - Evaluación, pruebas de inferencia y ranking (S011-FR-013, S011-FR-014).
 - [ ] T16 - Predicción, escenarios y entregables reabiertos (S011-FR-006, S011-FR-008, S011-FR-014).
