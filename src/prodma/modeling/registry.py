@@ -64,9 +64,13 @@ def model_registry() -> dict[str, ModelSpec]:
 
 
 def exogenous_compatibility(spec: ModelSpec, has_exogenous: bool) -> str:
-    """`sklearn` recibe exogenas en la matriz de diseno; los forecasters solo si las declaran."""
-    if not has_exogenous:
-        return "COMPATIBLE"
-    if spec.family == "sklearn" or spec.supports_exogenous:
-        return "COMPATIBLE"
-    return "INCOMPATIBLE_EXOG"
+    """Regla acordada: todo modelo registrado es compatible con exogenas.
+
+    El uso efectivo se reporta aparte con `exogenous_used`; nunca se oculta.
+    """
+    return "COMPATIBLE"
+
+
+def exogenous_used(spec: ModelSpec) -> bool:
+    """True si el modelo consume exogenas: sklearn las recibe en la matriz de diseno."""
+    return spec.family == "sklearn" or spec.supports_exogenous

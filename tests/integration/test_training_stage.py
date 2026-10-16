@@ -131,12 +131,12 @@ def test_training_stage_skips_target_without_contiguous_observed_test(tmp_path):
     assert (result.output / "csv" / "resumen_series.csv").is_file()
 
 
-def test_training_stage_marks_forecaster_incompatible_when_exogenous_selected(tmp_path):
+def test_training_stage_reports_exogenous_use_per_model_when_exogenous_selected(tmp_path):
     base = load_config(ROOT / "config/default.yaml")
     raw = dict(base.raw)
     raw["training"] = {"folds": 2, "min_train": 300, "n_trials": 1}
     config = replace(base, output_root=tmp_path, horizons=(24, 96), raw=raw)
-    layout = RunLayout.create(tmp_path, "run-incompatible")
+    layout = RunLayout.create(tmp_path, "run-exogenous-usage")
     index = pd.date_range("2025-01-01", periods=1200, freq="15min", name="Fecha")
     rng = np.random.default_rng(5)
     temperature = 20 + 6 * np.sin(np.arange(len(index)) * 2 * np.pi / 96) + rng.normal(scale=0.2, size=len(index))
@@ -165,9 +165,9 @@ def test_training_stage_marks_forecaster_incompatible_when_exogenous_selected(tm
     assert result.status == "SUCCESS"
     series = result.output / "series" / "M1_P"
     compatibility = pd.read_csv(series / "csv" / "compatibilidad_exogenas.csv").set_index("modelo")
-    assert compatibility.loc["SeasonalNaive", "estado"] == "INCOMPATIBLE_EXOG"
-    assert compatibility.loc["Ridge", "estado"] == "COMPATIBLE"
+    assert set(compatibility["estado"]) == {"COMPATIBLE"}
     assert compatibility.loc["Ridge", "exogenas"] > 0
+    assert bool(compatibility.loc["Ridge", "exogenas_usadas"]) is True
+    assert bool(compatibility.loc["SeasonalNaive", "exogenas_usadas"]) is False
     trained = pd.read_csv(series / "csv" / "entrenamientos.csv")
-    assert set(trained["modelo"]) == {"Ridge"}
-    assert not (series / "modelos" / "SeasonalNaive.joblib").exists()
+    assert set(trained["modelo"]) == {"Ridge", "SeasonalNaive"}

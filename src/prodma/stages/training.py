@@ -20,7 +20,7 @@ from prodma.modeling.adapters import TrainingSlice
 from prodma.modeling.ablation import FeatureSetBundle, compare_feature_sets
 from prodma.modeling.features import join_exogenous_features, make_features
 from prodma.modeling.prefilter import PrefilterPolicy, run_prefilter
-from prodma.modeling.registry import exogenous_compatibility, model_registry
+from prodma.modeling.registry import exogenous_compatibility, exogenous_used, model_registry
 from prodma.modeling.splits import nested_temporal_partition
 from prodma.modeling.train import build_training_slice, train_approved_models
 from prodma.stages import StageResult
@@ -117,7 +117,7 @@ def _train_series(target: str, prepared: dict, names: tuple[str, ...], registry:
     selected_exogenous = tuple(column for column in columns if column not in prepared["endogenous_columns"])
     compatibility = pd.DataFrame([
         {"serie": target, "modelo": name, "estado": exogenous_compatibility(registry[name], bool(selected_exogenous)),
-         "exogenas": len(selected_exogenous)}
+         "exogenas": len(selected_exogenous), "exogenas_usadas": exogenous_used(registry[name])}
         for name in names
     ])
     _atomic_csv(compatibility, output / "csv" / "compatibilidad_exogenas.csv")

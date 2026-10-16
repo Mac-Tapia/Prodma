@@ -67,7 +67,7 @@ def test_socioeconomic_signal_selects_its_group_and_keeps_its_columns():
     assert "temp_climatologica_c" not in result.selected_columns
 
 
-from prodma.modeling.registry import ModelSpec, exogenous_compatibility
+from prodma.modeling.registry import ModelSpec, exogenous_compatibility, exogenous_used
 
 
 def _spec(name, family, supports):
@@ -78,14 +78,15 @@ def test_sklearn_models_accept_exogenous_through_the_design_matrix():
     assert exogenous_compatibility(_spec("Ridge", "sklearn", False), has_exogenous=True) == "COMPATIBLE"
 
 
-def test_forecaster_without_exogenous_support_is_marked_incompatible():
-    spec = _spec("ARIMA", "forecaster", False)
-    assert exogenous_compatibility(spec, has_exogenous=True) == "INCOMPATIBLE_EXOG"
+def test_every_registered_model_is_compatible_with_exogenous_features():
+    for spec in (_spec("ARIMA", "forecaster", False), _spec("SARIMAX", "forecaster", True), _spec("Ridge", "sklearn", False)):
+        assert exogenous_compatibility(spec, has_exogenous=True) == "COMPATIBLE"
 
 
-def test_forecaster_with_exogenous_support_is_compatible():
-    spec = _spec("SARIMAX", "forecaster", True)
-    assert exogenous_compatibility(spec, has_exogenous=True) == "COMPATIBLE"
+def test_exogenous_use_is_reported_not_hidden():
+    assert exogenous_used(_spec("Ridge", "sklearn", False)) is True
+    assert exogenous_used(_spec("SARIMAX", "forecaster", True)) is True
+    assert exogenous_used(_spec("ARIMA", "forecaster", False)) is False
 
 
 def test_no_exogenous_columns_is_always_compatible():
