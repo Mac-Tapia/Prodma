@@ -10,8 +10,8 @@ Cada tarea termina con pruebas focalizadas y un commit independiente.
 - [x] T05 - Clima multiubicación con políticas separadas de histórico, operación y planeamiento (S011-FR-005, S011-FR-004).
 - [x] T06 - Economía BCRP con vintages o rezago conservador (S011-FR-004, S011-FR-006).
 - [x] T07 - Población y producción regional INEI con etiquetas oficiales (S011-FR-007).
-- [ ] T08 - Clientes realizados y escenarios confirmados separados (S011-FR-001, S011-FR-008).
-- [ ] T09 - Matrices exógenas reconciliadas con estados y procedencia (S011-FR-004, S011-FR-014).
+- [x] T08 - Clientes realizados y escenarios confirmados separados (S011-FR-001, S011-FR-008).
+- [x] T09 - Matrices exógenas reconciliadas con estados y procedencia (S011-FR-004, S011-FR-014).
 - [ ] T10 - Exógenas concatenadas en matriz candidata con ablación pareada (S011-FR-009, S011-FR-010).
 - [ ] T11 - Entrenamiento de todas las series elegibles con estados terminales (S011-FR-011, S011-FR-014).
 - [ ] T12 - Compatibilidad modelo-feature y backend efectivo (S011-FR-010, S011-FR-012).
