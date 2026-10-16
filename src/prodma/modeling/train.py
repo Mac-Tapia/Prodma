@@ -36,6 +36,7 @@ class TrainingResult:
     traces: pd.DataFrame
     timings: pd.DataFrame
     predictions: pd.DataFrame
+    final_test: pd.DataFrame
 
 
 def _prediction_rows(name: str, trial: int, fold: int, horizon: int, data: CleanTrainingData,
@@ -110,6 +111,7 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
     checkpoints: list[Path] = []
     prediction_rows_by_trial: dict[tuple[str, int], list[dict]] = {}
     final_prediction_rows: list[dict] = []
+    final_test_rows: list[dict] = []
     for name, base_spec in specs.items():
         started = time.perf_counter()
         try:
@@ -150,6 +152,19 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
                 TrainingSlice(data.x, data.y, calibration_positions, np.array([], dtype=int))
             )
             final_prediction_rows.extend(prediction_rows_by_trial.get((name, study.best_trial.number), []))
+            final_positions = data.y.index.get_indexer(partition.final_test_index)
+            if (final_positions < 0).any():
+                raise ValueError("test final sin objetivo observado")
+            final_prediction = final_adapter.predict(ForecastRequest(
+                data.x.iloc[final_positions], pd.DatetimeIndex(partition.final_test_index), len(final_positions),
+            ))
+            final_test_rows.extend(
+                {"timestamp": str(stamp), "modelo": name, "paso": step + 1,
+                 "y": float(actual), "prediccion": float(value)}
+                for step, (stamp, actual, value) in enumerate(zip(
+                    partition.final_test_index, data.y.iloc[final_positions].to_numpy(), final_prediction.to_numpy()
+                ))
+            )
             library_version = _version(final_adapter.model)
             key = CheckpointKey(
                 matrix_sha256, exogenous_sha256, tuple(data.x.columns), name, library_version,
@@ -184,4 +199,5 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
     return TrainingResult(
         pd.DataFrame(table_rows), tuple(checkpoints), pd.DataFrame(trace_rows), pd.DataFrame(timing_rows),
         pd.DataFrame(final_prediction_rows, columns=list(PREDICTION_COLUMNS)),
+        final_test=pd.DataFrame(final_test_rows, columns=["timestamp", "modelo", "paso", "y", "prediccion"]),
     )

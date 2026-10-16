@@ -7,6 +7,7 @@ import pandas as pd
 
 from prodma.artifacts import ManifestStore, RunLayout
 from prodma.evaluacion.etapa import evaluate_series
+from prodma.modeling.intervals import calibrate_final_test
 from prodma.stages import StageResult
 
 STAGE = "04_evaluacion"
@@ -32,6 +33,7 @@ def run_evaluation(config, layout: RunLayout) -> StageResult:
     training_root = layout.stage("03_entrenamiento")
     output_root = layout.stage(STAGE)
     tolerance = float(config.raw.get("evaluation", {}).get("coverage_tolerance", 0.05))
+    alpha = float(config.raw.get("evaluation", {}).get("alpha", 0.1))
     try:
         series_dirs = sorted(path for path in (training_root / "series").glob("*") if path.is_dir())
         if not series_dirs:
@@ -52,6 +54,10 @@ def run_evaluation(config, layout: RunLayout) -> StageResult:
             target = output_root / "series" / series_dir.name
             _atomic_csv(result["ranking"], target / "csv" / "ranking.csv")
             _atomic_csv(result["inferencia"]["pairwise"], target / "csv" / "inferencia_pareada.csv")
+            final_path = series_dir / "csv" / "predicciones_test_final.csv"
+            if final_path.is_file():
+                intervals = calibrate_final_test(pd.read_csv(final_path), config.horizons, alpha)
+                _atomic_csv(intervals, target / "csv" / "calibracion_intervalos.csv")
             admitted = result["ranking"].loc[result["ranking"]["admitido"], "modelo"].tolist()
             summary.append({"serie": series_dir.name, "estado": "EVALUADA",
                             "mejor_modelo": result["inferencia"]["mejor_modelo"],

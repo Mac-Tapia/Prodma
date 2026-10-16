@@ -46,3 +46,33 @@ def conditional_coverage(y: pd.Series, lower: pd.Series, upper: pd.Series, horiz
         "n": grouped.size().to_numpy(),
         "cobertura": grouped.mean().to_numpy(),
     })
+
+
+def calibrate_final_test(final: pd.DataFrame, horizons, alpha: float) -> pd.DataFrame:
+    """Calibra con la primera mitad del test final (intocado) y mide cobertura en la segunda.
+
+    `horizons` agrupa cada paso en el menor horizonte configurado que lo contiene.
+    """
+    ordered_horizons = sorted(int(h) for h in horizons)
+    rows: list[pd.DataFrame] = []
+    for name, group in final.sort_values("paso").groupby("modelo", sort=True):
+        steps = group["paso"].to_numpy(dtype=int)
+        residuals = (group["y"] - group["prediccion"]).to_numpy(dtype=float)
+        half = len(group) // 2
+        radius = split_conformal_radius(residuals[:half], alpha)
+        evaluation = group.iloc[half:]
+        prediction = pd.Series(evaluation["prediccion"].to_numpy(), index=evaluation["paso"].to_numpy())
+        observed = pd.Series(evaluation["y"].to_numpy(), index=evaluation["paso"].to_numpy())
+        bucket = pd.Series(
+            [next((h for h in ordered_horizons if step <= h), ordered_horizons[-1]) for step in evaluation["paso"]],
+            index=evaluation["paso"].to_numpy(),
+        )
+        table = conditional_coverage(observed, prediction - radius, prediction + radius, bucket)
+        table.insert(0, "modelo", name)
+        table["radio"] = radius
+        table["alpha"] = alpha
+        table["mitad_calibracion"] = int(half)
+        rows.append(table)
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(
+        columns=["modelo", "horizonte", "n", "cobertura", "radio", "alpha", "mitad_calibracion"]
+    )
