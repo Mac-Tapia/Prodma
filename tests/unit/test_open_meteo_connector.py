@@ -72,3 +72,15 @@ def test_urls_match_documented_open_meteo_shape():
         "&start_date=2023-01-01&end_date=2023-01-02&hourly=temperature_2m&timezone=America%2FLima"
     )
     assert "forecast?" in forecast_url(-14.0678, -75.7286, past_days=1, forecast_days=2)
+
+FORECAST = Path(__file__).parents[1] / "fixtures" / "external" / "open_meteo" / "forecast_ica_sample.json"
+
+
+def test_live_forecast_shape_parses_with_issue_time():
+    payload = json.loads(FORECAST.read_text(encoding="utf-8"))
+
+    frame = parse_forecast(payload, issue_time=pd.Timestamp("2026-10-15 00:00"))
+
+    assert len(frame) == 48
+    assert set(frame["calidad"]) == {"pronostico_operativo"}
+    assert frame["fecha_hora"].min() == pd.Timestamp("2026-10-14 00:00")
