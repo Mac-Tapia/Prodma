@@ -55,3 +55,12 @@ def test_missing_metric_is_an_explicit_exclusion_not_a_silent_drop():
 def test_empty_candidate_table_is_rejected():
     with pytest.raises(ValueError):
         rank_candidates(pd.DataFrame(columns=["modelo"]), coverage_tolerance=0.05)
+
+
+def test_missing_calibration_is_recorded_when_calibration_is_not_required():
+    frame = _candidates()
+    frame.loc[frame["modelo"] == "XGBoost", "cobertura_error"] = float("nan")
+    result = rank_candidates(frame, coverage_tolerance=0.05, require_calibration=False).set_index("modelo")
+    assert result.loc["XGBoost", "admitido"]
+    assert result.loc["XGBoost", "calibracion"] == "NO_EVALUADA"
+    assert result.loc["Ridge", "calibracion"] == "EVALUADA"
