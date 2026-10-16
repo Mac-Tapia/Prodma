@@ -26,12 +26,26 @@ class CleanTrainingData:
     imputed_mask: pd.Series
 
 
+PREDICTION_COLUMNS = ("timestamp", "modelo", "trial", "fold", "horizonte", "y", "prediccion")
+
+
 @dataclass(frozen=True)
 class TrainingResult:
     table: pd.DataFrame
     checkpoints: tuple[Path, ...]
     traces: pd.DataFrame
     timings: pd.DataFrame
+    predictions: pd.DataFrame
+
+
+def _prediction_rows(name: str, trial: int, fold: int, horizon: int, data: CleanTrainingData,
+                     positions: np.ndarray, prediction: pd.Series) -> list[dict]:
+    observed = data.y.iloc[positions]
+    return [
+        {"timestamp": str(stamp), "modelo": name, "trial": int(trial), "fold": int(fold),
+         "horizonte": int(horizon), "y": float(actual), "prediccion": float(value)}
+        for stamp, actual, value in zip(observed.index, observed.to_numpy(), prediction.to_numpy())
+    ]
 
 
 def build_training_slice(clean: pd.DataFrame, features: pd.DataFrame) -> CleanTrainingData:
@@ -94,6 +108,8 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
     trace_rows: list[dict] = []
     timing_rows: list[dict] = []
     checkpoints: list[Path] = []
+    prediction_rows_by_trial: dict[tuple[str, int], list[dict]] = {}
+    final_prediction_rows: list[dict] = []
     for name, base_spec in specs.items():
         started = time.perf_counter()
         try:
@@ -114,6 +130,9 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
                     ))
                     rmse = float(np.sqrt(np.mean((data.y.iloc[validation_positions].to_numpy() - prediction.to_numpy()) ** 2)))
                     fold_errors.append(rmse)
+                    prediction_rows_by_trial.setdefault((name, trial.number), []).extend(_prediction_rows(
+                        name, trial.number, fold_number, fold.horizon, data, validation_positions, prediction
+                    ))
                     trace_rows.append({
                         "modelo": name, "trial": trial.number, "fold": fold_number, "RMSE": rmse,
                         "train_end": str(fold.train_index[-1]), "validation_start": str(fold.validation_index[0]),
@@ -130,6 +149,7 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
             final_adapter = ForecastAdapter(best_spec, seed).fit(
                 TrainingSlice(data.x, data.y, calibration_positions, np.array([], dtype=int))
             )
+            final_prediction_rows.extend(prediction_rows_by_trial.get((name, study.best_trial.number), []))
             library_version = _version(final_adapter.model)
             key = CheckpointKey(
                 matrix_sha256, exogenous_sha256, tuple(data.x.columns), name, library_version,
@@ -161,4 +181,7 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
                 "backend_efectivo": "none", "seed": seed, "error": f"{type(exc).__name__}: {exc}",
             })
             timing_rows.append({"modelo": name, "fase": "fallo", "segundos": elapsed})
-    return TrainingResult(pd.DataFrame(table_rows), tuple(checkpoints), pd.DataFrame(trace_rows), pd.DataFrame(timing_rows))
+    return TrainingResult(
+        pd.DataFrame(table_rows), tuple(checkpoints), pd.DataFrame(trace_rows), pd.DataFrame(timing_rows),
+        pd.DataFrame(final_prediction_rows, columns=list(PREDICTION_COLUMNS)),
+    )

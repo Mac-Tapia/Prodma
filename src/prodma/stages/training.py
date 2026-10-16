@@ -148,6 +148,7 @@ def _train_series(target: str, prepared: dict, names: tuple[str, ...], registry:
     _atomic_csv(trained.table, output / "csv" / "entrenamientos.csv")
     _atomic_csv(trained.timings, output / "times" / "tiempos.csv")
     _atomic_csv(trained.traces, output / "traces" / "optuna_trials.csv")
+    _atomic_csv(trained.predictions, output / "csv" / "predicciones_validacion.csv")
     _atomic_csv(pd.concat([prefilter.assign(evento="prefiltro"), trained.table.assign(evento="entrenamiento")],
                           ignore_index=True, sort=False), output / "logs" / "eventos.csv")
     for checkpoint in trained.checkpoints:

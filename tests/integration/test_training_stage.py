@@ -68,6 +68,11 @@ def test_training_stage_writes_isolated_recoverable_artifacts(tmp_path):
         envelope["payload"]["model"].predict(features.iloc[-10:]),
         exported.predict(features.iloc[-10:]),
     )
+    predictions = pd.read_csv(series / "csv" / "predicciones_validacion.csv")
+    assert set(predictions["modelo"]) == {"Ridge", "SeasonalNaive"}
+    assert {"timestamp", "modelo", "fold", "horizonte", "y", "prediccion"}.issubset(predictions.columns)
+    assert predictions["prediccion"].notna().all()
+    assert predictions.groupby("modelo")["fold"].nunique().min() == 4  # 2 horizontes x 2 folds
     assert list((series / "times").glob("*.csv"))
     assert list((series / "traces").glob("*.csv"))
     assert ManifestStore(layout).read()["stages"]["03_entrenamiento"]["status"] == "SUCCESS"
