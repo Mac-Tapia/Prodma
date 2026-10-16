@@ -154,7 +154,12 @@ def build_exogenous_matrices(config: PipelineConfig, catalog: ExogenousCatalog,
     quality_historical = pd.DataFrame(index=historical_index)
     quality_historical["segmento"] = "historico"
     quality_historical["temperatura_tipo"] = "climatologia_ajustada_hasta_origen"
-    quality_historical["temperatura_fuente"] = weather.set_index("fecha_hora")["fuente_seleccionada"].reindex(historical_index).to_numpy()
+    hourly_source = weather.set_index("fecha_hora")["fuente_seleccionada"]
+    hour_sources = hourly_source.reindex(historical_index.floor("h")).to_numpy()
+    quality_historical["temperatura_fuente"] = [
+        None if base is None or pd.isna(base) else (base if minute == 0 else f"{base}+interpolado_lineal")
+        for base, minute in zip(hour_sources, historical_index.minute)
+    ]
     quality_historical["pbi_disponible"] = historical["pbi_last_known"].notna()
     quality_historical["poblacion_tipo"] = "observada_o_interpolada_declarada"
     quality_future = pd.DataFrame(index=future_index)

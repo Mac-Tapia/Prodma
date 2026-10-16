@@ -24,7 +24,7 @@ def test_temperature_comes_from_the_hashed_open_meteo_snapshot_and_is_traced():
 
     assert "temperatura_fuente" in matrices.quality.columns
     historical = matrices.quality[matrices.quality["segmento"] == "historico"]
-    assert set(historical["temperatura_fuente"]) == {"open_meteo_archive"}
+    # Horas exactas: fuente directa. Cuartos de hora: interpolación lineal declarada, nunca medición.`n    assert set(historical["temperatura_fuente"]) == {"open_meteo_archive", "open_meteo_archive+interpolado_lineal"}`n    assert historical["temperatura_fuente"].notna().all()`n    on_hour = historical.index.minute == 0`n    assert set(historical.loc[on_hour, "temperatura_fuente"]) == {"open_meteo_archive"}
 
 
 def test_temperature_without_any_usable_source_fails_closed(tmp_path):
