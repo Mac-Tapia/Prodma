@@ -132,3 +132,33 @@ def test_default_gate_blocks_a_model_whose_calibration_deviates_and_reports_it(t
     result = run_prediction(config, layout)
     summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
     assert summary.loc[0, "estado"] == "SIN_MODELO_ADMITIDO"
+
+def test_prediction_stage_publishes_client_scenarios_on_top_of_operational_forecast(tmp_path):
+    rng = np.random.default_rng(25)
+    index_length = 1200
+    values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
+    temperature = rng.normal(size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-client-scenarios", values, temperature)
+    scenario_table = pd.DataFrame([{
+        "medidor": "M1", "anio": 2025, "limite_inferior_kw": 0.0, "central_kw": 5.0,
+        "limite_superior_kw": 8.0, "clientes": 2, "clientes_excluidos": 0, "calidad": "scenario_no_observed",
+    }])
+    scenario_path = layout.stage("02_limpieza", "datos") / "escenario_clientes_confirmados.parquet"
+    scenario_table.to_parquet(scenario_path, index=False)
+    manifest = ManifestStore(layout)
+    stage_two = manifest.read()["stages"]["02_limpieza"]
+    manifest.update_stage("02_limpieza", "SUCCESS", artifacts={
+        **stage_two["artifacts"], "new_customer_scenario": str(scenario_path),
+    })
+    config = _with_tolerance(config, layout, 0.5)
+
+    result = run_prediction(config, layout)
+
+    table = pd.read_csv(result.output / "series" / "M1_P" / "csv" / "pronostico_escenarios.csv")
+    assert set(table["escenario"]) == {"base", "inferior", "central", "superior"}
+    assert len(table) == 4 * 96
+    base = table.loc[table["escenario"] == "base", "prediccion_total"].to_numpy()
+    central = table.loc[table["escenario"] == "central", "prediccion_total"].to_numpy()
+    np.testing.assert_allclose(central - base, 5.0)
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "escenarios"] == "ESCENARIOS_APLICADOS"

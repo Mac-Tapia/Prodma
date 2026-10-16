@@ -15,6 +15,7 @@ from prodma.artifacts import ManifestStore, RunLayout
 from prodma.modeling.origenes import origin_forecasts, recursive_forecast
 from prodma.modeling.intervals import calibrate_rolling
 from prodma.modeling.registry import model_registry
+from prodma.prediccion.escenarios import apply_scenarios, customer_increments
 from prodma.stages import StageResult
 from prodma.stages.training import _quality_for_target
 
@@ -72,6 +73,20 @@ def run_prediction(config, layout: RunLayout) -> StageResult:
             clean = _quality_for_target(quality, target)
             forecast = recursive_forecast(model, columns, clean, horizon)
             _atomic_csv(forecast, output_root / "series" / target / "csv" / "pronostico_operativo.csv")
+            scenario_state = "SIN_TABLA_ESCENARIOS"
+            scenario_path = Path(stage_two.get("artifacts", {}).get("new_customer_scenario", ""))
+            meter = target.rsplit("_", 1)[0]
+            if scenario_path.is_file():
+                customer_table = pd.read_parquet(scenario_path)
+                if meter in set(customer_table["medidor"].astype(str)):
+                    base = pd.DataFrame({"timestamp": pd.to_datetime(forecast["timestamp"]),
+                                         "prediccion": forecast["prediccion"].to_numpy()})
+                    increments = customer_increments(customer_table, meter, base["timestamp"])
+                    scenarios = apply_scenarios(base, increments)
+                    _atomic_csv(scenarios, output_root / "series" / target / "csv" / "pronostico_escenarios.csv")
+                    scenario_state = "ESCENARIOS_APLICADOS"
+                else:
+                    scenario_state = "SIN_ESCENARIO_MEDIDOR"
             final_stamps = pd.to_datetime(pd.read_csv(training_dir / "csv" / "predicciones_test_final.csv")["timestamp"])
             alpha = float(config.raw.get("evaluation", {}).get("alpha", 0.1))
             coverage = pd.concat([
@@ -79,7 +94,7 @@ def run_prediction(config, layout: RunLayout) -> StageResult:
                 for h in sorted(config.horizons)
             ], ignore_index=True)
             _atomic_csv(coverage, output_root / "series" / target / "csv" / "calibracion_rolling.csv")
-            summary.append({"serie": target, "estado": "PRONOSTICADA", "modelo": model_name,
+            summary.append({"serie": target, "estado": "PRONOSTICADA", "modelo": model_name, "escenarios": scenario_state,
                             "horizonte": horizon, "inicio": forecast["timestamp"].iloc[0]})
         summary_frame = pd.DataFrame(summary)
         _atomic_csv(summary_frame, output_root / "csv" / "resumen_prediccion.csv")
