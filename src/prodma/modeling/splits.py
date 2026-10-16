@@ -26,7 +26,7 @@ def nested_temporal_partition(index, horizons, folds: int, min_train: int,
     horizons = tuple(int(horizon) for horizon in horizons)
     if not horizons or folds <= 0 or min_train <= 0:
         raise ValueError("horizontes, folds y min_train deben ser positivos")
-    final_size = max(horizons)
+    final_size = 2 * max(horizons)  # test final: dos ventanas del horizonte mayor para calibrar y medir
     if len(ordered) <= final_size:
         raise InsufficientHistory("HISTORIA_INSUFICIENTE: no alcanza para reservar test final")
     final_test = ordered[-final_size:]

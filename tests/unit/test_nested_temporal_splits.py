@@ -12,7 +12,7 @@ def test_final_test_is_disjoint_from_prefilter_selection_and_tuning():
     used = set().union(*(set(fold.train_index) | set(fold.validation_index) for fold in partition.inner_folds))
     assert used.isdisjoint(partition.final_test_index)
     assert partition.inner_folds[-1].validation_index[-1] < partition.final_test_index[0]
-    assert len(partition.final_test_index) == 2688
+    assert len(partition.final_test_index) == 2 * 2688  # test final = 2 x horizonte maximo
 
 
 def test_insufficient_history_has_explicit_state():

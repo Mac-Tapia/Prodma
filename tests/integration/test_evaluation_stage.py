@@ -96,8 +96,8 @@ def test_evaluation_publishes_conformal_coverage_from_untouched_final_test(tmp_p
     series = result.output / "series" / "M1_P"
     final = pd.read_csv(layout.stage("03_entrenamiento") / "series" / "M1_P" / "csv" / "predicciones_test_final.csv")
     assert set(final["modelo"]) == {"Ridge"}
-    assert len(final) == 96
+    assert len(final) == 192  # 2 x horizonte maximo (96)
     coverage = pd.read_csv(series / "csv" / "calibracion_intervalos.csv")
     assert {"modelo", "horizonte", "n", "cobertura", "radio", "alpha"}.issubset(coverage.columns)
-    assert coverage.loc[coverage["horizonte"] == 96, "n"].iloc[0] == 48
+    assert coverage.loc[coverage["horizonte"] == 96, "n"].iloc[0] == 96
     assert coverage["cobertura"].between(0, 1).all()
