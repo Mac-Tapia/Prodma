@@ -61,6 +61,7 @@ def run_evaluation(config, layout: RunLayout) -> StageResult:
             admitted = result["ranking"].loc[result["ranking"]["admitido"], "modelo"].tolist()
             summary.append({"serie": series_dir.name, "estado": "EVALUADA",
                             "mejor_modelo": result["inferencia"]["mejor_modelo"],
+                            "mcs": ";".join(result["inferencia"]["mcs"]),
                             "admitidos": ";".join(admitted),
                             "bloques_no_alineados": result["inferencia"]["bloques_no_alineados"]})
         summary_frame = pd.DataFrame(summary)

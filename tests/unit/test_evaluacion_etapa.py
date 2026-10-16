@@ -64,3 +64,16 @@ def test_misaligned_blocks_are_counted_not_silently_dropped():
     result = evaluate_series(predictions, trained, times, pd.DataFrame(columns=["modelo", "estado"]),
                              coverage_tolerance=0.05)
     assert result["inferencia"]["bloques_no_alineados"] == 1
+
+
+def test_mcs_keeps_the_best_model_and_eliminates_the_worst():
+    predictions = _predictions({"Ridge": 0.5, "SeasonalNaive": 6.0, "Other": 0.6}, blocks=60, seed=9)
+    trained = pd.DataFrame([{"modelo": m, "estado": "ENTRENADO", "parameters": "{}"}
+                            for m in ("Ridge", "SeasonalNaive", "Other")])
+    times = pd.DataFrame([{"modelo": m, "fase": "tuning_y_refit", "segundos": 1.0}
+                          for m in ("Ridge", "SeasonalNaive", "Other")])
+    result = evaluate_series(predictions, trained, times, pd.DataFrame(columns=["modelo", "estado"]),
+                             coverage_tolerance=0.05)
+    mcs = result["inferencia"]["mcs"]
+    assert "Ridge" in mcs
+    assert "SeasonalNaive" not in mcs

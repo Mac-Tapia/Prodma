@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from prodma.evaluacion.inferencia import diebold_mariano, friedman_holm
+from prodma.evaluacion.mcs import model_confidence_set
 from prodma.evaluacion.ranking import rank_candidates
 
 BLOCK = ["horizonte", "fold", "timestamp"]
@@ -54,7 +55,11 @@ def evaluate_series(predictions: pd.DataFrame, trained: pd.DataFrame, times: pd.
     ranking = rank_candidates(candidates, coverage_tolerance=coverage_tolerance, require_calibration=False)
 
     inference: dict = {"bloques": int(len(aligned)), "bloques_no_alineados": not_aligned,
-                       "mejor_modelo": None, "pairwise": pd.DataFrame(columns=["modelo", "p_valor", "p_holm", "p_dm"])}
+                       "mejor_modelo": None, "mcs": [], "pairwise": pd.DataFrame(columns=["modelo", "p_valor", "p_holm", "p_dm"])}
+    if aligned.shape[1] >= 2 and aligned.shape[0] >= 30:
+        mcs = model_confidence_set(aligned, alpha=0.1, block_length=max(1, min(24, len(aligned) // 10)))
+        inference["mcs"] = mcs["mcs"]
+        inference["mcs_p_valores"] = mcs["p_valores"]
     if aligned.shape[1] >= 3 and aligned.shape[0] >= 3:
         result = friedman_holm(aligned)
         inference["mejor_modelo"] = result["mejor_modelo"]
