@@ -12,6 +12,12 @@ from prodma.stages.evaluation import run_evaluation
 
 ROOT = __import__("pathlib").Path(__file__).parents[2]
 
+def _with_tolerance(config, layout, tolerance):
+    """Rerun evaluation with an explicit coverage tolerance so the admitted path is exercised."""
+    adjusted = replace(config, raw={**config.raw, "evaluation": {"coverage_tolerance": tolerance}})
+    assert run_evaluation(adjusted, layout).status == "SUCCESS"
+    return adjusted
+
 
 def _sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -53,6 +59,7 @@ def test_prediction_stage_forecasts_next_horizon_when_best_model_needs_no_future
     values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
     temperature = rng.normal(size=index_length)  # sin senal: la ablacion no la usa
     config, layout = _run_pipeline(tmp_path, "run-prediction-endogenous", values, temperature)
+    config = _with_tolerance(config, layout, 0.5)
 
     result = run_prediction(config, layout)
 
@@ -86,6 +93,7 @@ def test_rolling_origin_coverage_is_published_for_every_configured_horizon(tmp_p
     values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
     temperature = rng.normal(size=index_length)
     config, layout = _run_pipeline(tmp_path, "run-rolling-coverage", values, temperature)
+    config = _with_tolerance(config, layout, 0.5)
 
     result = run_prediction(config, layout)
 
@@ -94,3 +102,33 @@ def test_rolling_origin_coverage_is_published_for_every_configured_horizon(tmp_p
     assert (table["n"] == 96).all()
     assert table["cobertura"].between(0, 1).all()
     assert (table["radio"] > 0).all()
+
+
+def test_evaluation_ranking_uses_measured_calibration_for_models_without_future_exogenous(tmp_path):
+    rng = np.random.default_rng(24)
+    index_length = 1200
+    values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
+    temperature = rng.normal(size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-ranking-calibration", values, temperature)
+
+    ranking = pd.read_csv(layout.stage("04_evaluacion") / "series" / "M1_P" / "csv" / "ranking.csv").set_index("modelo")
+    assert ranking.loc["Ridge", "calibracion"] == "EVALUADA"
+    assert np.isfinite(ranking.loc["Ridge", "cobertura_error"])
+
+
+def test_default_gate_blocks_a_model_whose_calibration_deviates_and_reports_it(tmp_path):
+    rng = np.random.default_rng(21)
+    index_length = 1200
+    values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
+    temperature = rng.normal(size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-default-gate", values, temperature)
+
+    ranking = pd.read_csv(layout.stage("04_evaluacion") / "series" / "M1_P" / "csv" / "ranking.csv").set_index("modelo")
+    assert ranking.loc["Ridge", "calibracion"] == "EVALUADA"
+    # Semilla fija: la desviacion de cobertura (~0.11) supera la tolerancia por defecto (0.05).
+    assert ranking.loc["Ridge", "cobertura_error"] > 0.05
+    assert ranking.loc["Ridge", "causa_exclusion"] == "calibracion_fuera_de_tolerancia"
+    assert not bool(ranking.loc["Ridge", "admitido"])
+    result = run_prediction(config, layout)
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "SIN_MODELO_ADMITIDO"

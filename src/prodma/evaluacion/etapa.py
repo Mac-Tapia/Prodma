@@ -25,7 +25,8 @@ def _complexity(parameters: str) -> int:
 
 
 def evaluate_series(predictions: pd.DataFrame, trained: pd.DataFrame, times: pd.DataFrame,
-                    prefilter: pd.DataFrame, coverage_tolerance: float) -> dict:
+                    prefilter: pd.DataFrame, coverage_tolerance: float,
+                    calibration_errors: dict | None = None) -> dict:
     predictions = predictions.assign(perdida=(predictions["y"] - predictions["prediccion"]).abs())
     wide = predictions.pivot_table(index=BLOCK, columns="modelo", values="perdida", aggfunc="first")
     aligned = wide.dropna(how="any")
@@ -40,7 +41,7 @@ def evaluate_series(predictions: pd.DataFrame, trained: pd.DataFrame, times: pd.
             "estado": _estado_entrenamiento(row.estado),
             "mae": float(series.mean()) if len(series) else np.nan,
             "estabilidad": float(fold_mae.std().get(row.modelo, np.nan)),
-            "cobertura_error": np.nan,
+            "cobertura_error": (calibration_errors or {}).get(row.modelo, np.nan),
             "complejidad": _complexity(row.parameters),
             "segundos": float(times.loc[times["modelo"] == row.modelo, "segundos"].sum()),
         })
