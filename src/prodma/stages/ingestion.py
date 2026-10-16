@@ -136,7 +136,11 @@ def run_ingestion(config: PipelineConfig, layout: RunLayout) -> StageResult:
     if len(new_customer_files) > 1:
         raise ValueError("Multiples archivos de nuevos clientes")
     if new_customer_files:
-        customer_result = ingest_new_customers(new_customer_files[0])
+        known = None
+        if custody.get("catalogo"):
+            import pandas as pd
+            known = set(pd.read_parquet(custody["catalogo"])["identificador"])
+        customer_result = ingest_new_customers(new_customer_files[0], known_meters=known)
         customer_table_path = parquet_dir / "nuevos_clientes.parquet"
         customer_result.table.to_parquet(customer_table_path, index=False)
         customer_audit_path = write_new_customer_audit(customer_result, layout)

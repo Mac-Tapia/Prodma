@@ -49,8 +49,10 @@ def test_scenarios_are_bounded_ordered_and_never_add_to_history():
 
     scenarios = customer_scenarios(source)
 
-    assert (scenarios["limite_inferior_kw"] <= scenarios["central_kw"]).all()
-    assert (scenarios["central_kw"] <= scenarios["limite_superior_kw"]).all()
+    valid = scenarios["central_kw"].notna()
+    assert valid.any()
+    assert (scenarios.loc[valid, "limite_inferior_kw"] <= scenarios.loc[valid, "central_kw"]).all()
+    assert (scenarios.loc[valid, "central_kw"] <= scenarios.loc[valid, "limite_superior_kw"]).all()
     pd.testing.assert_frame_equal(source, before)
 
 

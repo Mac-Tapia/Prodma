@@ -105,19 +105,10 @@ def write_new_customer_audit(result: NewCustomerResult, layout: RunLayout) -> Pa
 
 
 def publish_new_customer_scenario(result: NewCustomerResult, layout: RunLayout) -> dict[str, str]:
+    from prodma.customers.scenarios import customer_scenarios
+
     audit = write_new_customer_audit(result, layout)
-    table = result.table.copy()
-    valid = table["estado_capacidad"].eq("VALIDA")
-    table["central_component"] = table["incremento_kw"].where(valid)
-    table["upper_component"] = table["demanda_kw"].where(valid & table["incremento_kw"].gt(0))
-    scenario = table.groupby(["medidor", "anio", "estado_mapeo", "estado_capacidad"], as_index=False).agg(
-        limite_inferior_kw=("incremento_kw", lambda values: 0.0),
-        central_kw=("central_component", lambda values: values.sum(min_count=1)),
-        limite_superior_kw=("upper_component", lambda values: values.sum(min_count=1)),
-        clientes=("cliente", "nunique"),
-    )
-    scenario["calidad"] = "scenario_no_observed"
-    scenario["fecha_entrada"] = pd.NaT
+    scenario = customer_scenarios(result.table)
     target = layout.stage("02_limpieza", "datos") / "escenario_clientes_confirmados.parquet"
     scenario.to_parquet(target, index=False)
     return {"new_customer_scenario": str(target), "new_customer_audit": str(audit),
