@@ -13,6 +13,7 @@ import pandas as pd
 
 from prodma.artifacts import ManifestStore, RunLayout
 from prodma.modeling.features import make_features
+from prodma.modeling.intervals import calibrate_rolling
 from prodma.modeling.registry import model_registry
 from prodma.stages import StageResult
 from prodma.stages.training import _quality_for_target
@@ -46,6 +47,18 @@ def recursive_forecast(model, columns: list[str], clean: pd.DataFrame, horizon: 
         values.append(value)
     return pd.DataFrame({"timestamp": [str(s) for s in stamps], "paso": range(1, horizon + 1), "prediccion": values})
 
+
+def origin_forecasts(model, columns: list[str], clean: pd.DataFrame, final_stamps, horizon: int) -> pd.DataFrame:
+    """Pronostica `horizon` pasos desde cada origen dentro del test final (sin reentrenar)."""
+    stamps = pd.DatetimeIndex(final_stamps)
+    step = clean.index[1] - clean.index[0]
+    rows: list[pd.DataFrame] = []
+    for origin, start in enumerate(range(0, len(stamps) - horizon + 1, horizon)):
+        history = clean.loc[: stamps[start] - step]
+        forecast = recursive_forecast(model, columns, history, horizon)
+        observed = clean["contexto"].reindex(stamps[start:start + horizon]).to_numpy(dtype=float)
+        rows.append(pd.DataFrame({"origen": origin, "y": observed, "prediccion": forecast["prediccion"].to_numpy()}))
+    return pd.concat(rows, ignore_index=True)
 
 def _fail(layout: RunLayout, message: str) -> StageResult:
     ManifestStore(layout).update_stage(STAGE, "FAILED", error=message)
@@ -91,6 +104,13 @@ def run_prediction(config, layout: RunLayout) -> StageResult:
             clean = _quality_for_target(quality, target)
             forecast = recursive_forecast(model, columns, clean, horizon)
             _atomic_csv(forecast, output_root / "series" / target / "csv" / "pronostico_operativo.csv")
+            final_stamps = pd.to_datetime(pd.read_csv(training_dir / "csv" / "predicciones_test_final.csv")["timestamp"])
+            alpha = float(config.raw.get("evaluation", {}).get("alpha", 0.1))
+            coverage = pd.concat([
+                calibrate_rolling(origin_forecasts(model, columns, clean, final_stamps, int(h)), int(h), alpha)
+                for h in sorted(config.horizons)
+            ], ignore_index=True)
+            _atomic_csv(coverage, output_root / "series" / target / "csv" / "calibracion_rolling.csv")
             summary.append({"serie": target, "estado": "PRONOSTICADA", "modelo": model_name,
                             "horizonte": horizon, "inicio": forecast["timestamp"].iloc[0]})
         summary_frame = pd.DataFrame(summary)

@@ -78,3 +78,19 @@ def test_prediction_stage_blocks_best_model_that_needs_future_exogenous(tmp_path
     summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
     assert summary.loc[0, "estado"] == "REQUIERE_EXOGENAS_FUTURAS"
     assert not (result.output / "series" / "M1_P" / "csv" / "pronostico_operativo.csv").exists()
+
+
+def test_rolling_origin_coverage_is_published_for_every_configured_horizon(tmp_path):
+    rng = np.random.default_rng(23)
+    index_length = 1200
+    values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
+    temperature = rng.normal(size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-rolling-coverage", values, temperature)
+
+    result = run_prediction(config, layout)
+
+    table = pd.read_csv(result.output / "series" / "M1_P" / "csv" / "calibracion_rolling.csv")
+    assert set(table["horizonte"]) == {24, 96}
+    assert (table["n"] == 96).all()
+    assert table["cobertura"].between(0, 1).all()
+    assert (table["radio"] > 0).all()

@@ -76,3 +76,25 @@ def calibrate_final_test(final: pd.DataFrame, horizons, alpha: float) -> pd.Data
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(
         columns=["modelo", "horizonte", "n", "cobertura", "radio", "alpha", "mitad_calibracion"]
     )
+
+
+def calibrate_rolling(origin_frame: pd.DataFrame, horizon: int, alpha: float) -> pd.DataFrame:
+    """Calibra con la primera mitad de los origenes y mide cobertura en la segunda.
+
+    `origin_frame` tiene columnas origen, y, prediccion; cada origen aporta `horizon` pasos.
+    """
+    origins = sorted(origin_frame["origen"].unique())
+    half = len(origins) // 2
+    if half == 0:
+        raise CalibrationInsufficient(f"{CalibrationInsufficient.state}: se requieren al menos dos origenes")
+    calibration = origin_frame[origin_frame["origen"].isin(origins[:half])]
+    evaluation = origin_frame[origin_frame["origen"].isin(origins[half:])]
+    radius = split_conformal_radius((calibration["y"] - calibration["prediccion"]).to_numpy(dtype=float), alpha)
+    prediction = pd.Series(evaluation["prediccion"].to_numpy(dtype=float), index=range(len(evaluation)))
+    observed = pd.Series(evaluation["y"].to_numpy(dtype=float), index=range(len(evaluation)))
+    bucket = pd.Series(int(horizon), index=range(len(evaluation)))
+    table = conditional_coverage(observed, prediction - radius, prediction + radius, bucket)
+    table["radio"] = radius
+    table["alpha"] = alpha
+    table["origenes_calibracion"] = int(half)
+    return table
