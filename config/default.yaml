@@ -36,6 +36,8 @@ exogenous:
       availability: historical_only
       future_policy: climatology
       source_url: https://open-meteo.com/en/docs/historical-weather-api
+      # Snapshot crudo verificado por hash; fuente primaria de la matriz histórica de temperatura.
+      raw_snapshot: variables_externas/_raw/open_meteo_archive/2026-10-15/respuesta.raw
       enabled: true
     pbi_bcrp:
       path: variables_externas/economia/pbi_mensual_bcrp_2023_2026.csv

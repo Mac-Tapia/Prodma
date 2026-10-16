@@ -18,6 +18,9 @@ from prodma.exogenas.asof import asof_values
 from prodma.exogenas.contracts import ExogenousCatalog
 from prodma.exogenas.weather import build_weather_features
 from prodma.external.connectors.bcrp import parse_period_name, publication_calendar
+from prodma.external.connectors.open_meteo import parse_archive
+from prodma.external.connectors.senamhi import parse_verified_export
+from prodma.external.weather_policy import choose_historical_source
 from prodma.variables_externas import poblacion_en_fecha
 
 
@@ -40,6 +43,24 @@ def _sha256(path: Path) -> str:
 
 def _source(catalog: ExogenousCatalog, name: str):
     return next(source for source in catalog.sources if source.name == name and source.enabled)
+
+
+def _historical_temperature(config: PipelineConfig, catalog: ExogenousCatalog) -> pd.DataFrame:
+    """Temperatura histórica por prioridad: SENAMHI verificado > Open-Meteo archivo (snapshot)."""
+    sources = config.raw["exogenous"]["sources"]
+    frames: dict[str, pd.DataFrame] = {}
+    senamhi_path = sources.get("senamhi_ica", {}).get("path")
+    if senamhi_path and (config.project_root / senamhi_path).is_file():
+        frames["senamhi"] = parse_verified_export(config.project_root / senamhi_path)
+    raw_relative = sources.get("temperatura_ica", {}).get("raw_snapshot")
+    if raw_relative:
+        raw_path = config.project_root / raw_relative
+        if not raw_path.is_file():
+            raise ValueError(f"temperatura: snapshot ausente {raw_path}")
+        frames["open_meteo_archive"] = parse_archive(json.loads(raw_path.read_bytes().decode("utf-8")))
+    if not frames:
+        raise ValueError("temperatura: ninguna fuente histórica utilizable")
+    return choose_historical_source(frames)
 
 
 def _calendar_features(path: Path, index: pd.DatetimeIndex) -> pd.DataFrame:
@@ -115,7 +136,7 @@ def build_exogenous_matrices(config: PipelineConfig, catalog: ExogenousCatalog,
     historical = _calendar_features(calendar_source.path, historical_index)
     future = _calendar_features(calendar_source.path, future_index)
 
-    weather = pd.read_csv(weather_source.path)
+    weather = _historical_temperature(config, catalog)
     combined_index = historical_index.append(future_index)
     weather_features = build_weather_features(weather, combined_index, origin=historical_index.max())
     historical["temp_climatologica_c"] = weather_features.climatology.reindex(historical_index)
@@ -133,11 +154,13 @@ def build_exogenous_matrices(config: PipelineConfig, catalog: ExogenousCatalog,
     quality_historical = pd.DataFrame(index=historical_index)
     quality_historical["segmento"] = "historico"
     quality_historical["temperatura_tipo"] = "climatologia_ajustada_hasta_origen"
+    quality_historical["temperatura_fuente"] = weather.set_index("fecha_hora")["fuente_seleccionada"].reindex(historical_index).to_numpy()
     quality_historical["pbi_disponible"] = historical["pbi_last_known"].notna()
     quality_historical["poblacion_tipo"] = "observada_o_interpolada_declarada"
     quality_future = pd.DataFrame(index=future_index)
     quality_future["segmento"] = "futuro"
     quality_future["temperatura_tipo"] = "climatologia_no_pronostico_meteorologico"
+    quality_future["temperatura_fuente"] = "climatologia_planeamiento"
     quality_future["pbi_disponible"] = future["pbi_last_known"].notna()
     quality_future["poblacion_tipo"] = "ultimo_valor_o_proyeccion_disponible"
     quality = pd.concat([quality_historical, quality_future])
