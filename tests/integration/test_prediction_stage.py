@@ -227,3 +227,50 @@ def test_exogenous_model_reports_missing_future_variables_explicitly(tmp_path):
     assert summary.loc[0, "estado"] == "REQUIERE_EXOGENAS_FUTURAS"
     assert "NO_PROVISTAS" in summary.loc[0, "exogenas_futuras"]
     assert not (result.output / "series" / "M1_P" / "csv" / "pronostico_operativo.csv").exists()
+
+
+def _configured(config):
+    raw = {**config.raw, "exogenas_futuras": {"open_meteo": {"habilitado": True, "latitud": -14.07, "longitud": -75.73}}}
+    return replace(config, raw=raw)
+
+
+def test_configured_open_meteo_source_feeds_the_exogenous_model(tmp_path, monkeypatch):
+    rng = np.random.default_rng(29)
+    index_length = 1200
+    temperature = 20 + 6 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.2, size=index_length)
+    values = 100 + 9 * (temperature - 20) + rng.normal(scale=0.5, size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-open-meteo-config", values, temperature)
+    config = _with_tolerance(_configured(config), layout, 0.5)
+    calls = []
+
+    def fake_source(section, stamps, **kwargs):
+        calls.append(section)
+        return _future_temperature(stamps, 0.0)
+
+    monkeypatch.setattr("prodma.stages.prediction.open_meteo_future_exog", fake_source)
+    result = run_prediction(config, layout)
+
+    assert len(calls) == 1
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "PRONOSTICADA"
+    assert summary.loc[0, "exogenas_futuras"] == "PROVISTAS"
+
+
+def test_open_meteo_failure_is_reported_in_the_summary_not_hidden(tmp_path, monkeypatch):
+    rng = np.random.default_rng(30)
+    index_length = 1200
+    temperature = 20 + 6 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.2, size=index_length)
+    values = 100 + 9 * (temperature - 20) + rng.normal(scale=0.5, size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-open-meteo-failure", values, temperature)
+    config = _configured(config)
+
+    def failing_source(section, stamps, **kwargs):
+        raise ValueError("Open-Meteo rechazo la consulta: limite excedido")
+
+    monkeypatch.setattr("prodma.stages.prediction.open_meteo_future_exog", failing_source)
+    result = run_prediction(config, layout)
+
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "REQUIERE_EXOGENAS_FUTURAS"
+    assert summary.loc[0, "exogenas_futuras"].startswith("ERROR_EXOG_FUTURA")
+    assert "limite excedido" in summary.loc[0, "exogenas_futuras"]

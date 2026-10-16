@@ -14,6 +14,7 @@ import joblib
 import pandas as pd
 
 from prodma.artifacts import ManifestStore, RunLayout
+from prodma.exogenas.futuras import open_meteo_future_exog
 from prodma.modeling.features import make_features
 from prodma.modeling.intervals import calibrate_rolling
 from prodma.modeling.origenes import origin_forecasts, recursive_forecast
@@ -42,9 +43,12 @@ def _future_stamps(clean_index: pd.DatetimeIndex, horizon: int) -> pd.DatetimeIn
     return pd.DatetimeIndex([clean_index[-1] + step * k for k in range(1, horizon + 1)])
 
 
-def _future_status(needed: list[str], future_exog: pd.DataFrame | None, stamps: pd.DatetimeIndex) -> str:
+def _future_status(needed: list[str], future_exog: pd.DataFrame | None, stamps: pd.DatetimeIndex,
+                   error: str | None = None) -> str:
     if not needed:
         return "NO_REQUIERE"
+    if future_exog is None and error:
+        return f"ERROR_EXOG_FUTURA:{error}"
     if future_exog is None:
         return f"NO_PROVISTAS:{','.join(needed)}"
     missing = [column for column in needed if column not in future_exog.columns]
@@ -73,6 +77,13 @@ def run_prediction(config, layout: RunLayout, future_exog: pd.DataFrame | None =
     alpha = float(config.raw.get("evaluation", {}).get("alpha", 0.1))
     registry = model_registry()
     exog_path = Path(stage_two.get("artifacts", {}).get("exogenous_historical", ""))
+    future_error = None
+    section = config.raw.get("exogenas_futuras", {}).get("open_meteo", {})
+    if future_exog is None and section.get("habilitado"):
+        try:
+            future_exog = open_meteo_future_exog(section, _future_stamps(quality.index, horizon))
+        except Exception as exc:
+            future_error = f"{type(exc).__name__}: {exc}"
     try:
         summary: list[dict] = []
         for series_dir in sorted(p for p in (evaluation_root / "series").glob("*") if p.is_dir()):
@@ -94,7 +105,7 @@ def run_prediction(config, layout: RunLayout, future_exog: pd.DataFrame | None =
             endogenous = list(make_features(clean).columns)
             needed = [column for column in columns if column not in endogenous]
             stamps = _future_stamps(clean.index, horizon)
-            future_state = _future_status(needed, future_exog, stamps)
+            future_state = _future_status(needed, future_exog, stamps, future_error)
             final_stamps = pd.to_datetime(pd.read_csv(training_dir / "csv" / "predicciones_test_final.csv")["timestamp"])
             exog_history = None
             if needed:
