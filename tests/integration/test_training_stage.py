@@ -51,10 +51,11 @@ def test_training_stage_writes_isolated_recoverable_artifacts(tmp_path):
     result = run_training(config, layout, model_names=("SeasonalNaive", "Ridge"))
 
     assert result.status == "SUCCESS"
-    assert (result.output / "csv/entrenamientos.csv").is_file()
-    assert len(list((result.output / "modelos").glob("*.joblib"))) == 2
-    assert len(list((result.output / "checkpoints").glob("*.joblib"))) == 2
-    envelope = joblib.load(result.output / "checkpoints" / "Ridge.joblib")
+    series = result.output / "series" / "M1_P"
+    assert (series / "csv/entrenamientos.csv").is_file()
+    assert len(list((series / "modelos").glob("*.joblib"))) == 2
+    assert len(list((series / "checkpoints").glob("*.joblib"))) == 2
+    envelope = joblib.load(series / "checkpoints" / "Ridge.joblib")
     assert "sin_vintage" not in envelope["key"].columns
     clean = pd.DataFrame({key.split("__")[-1]: value for key, value in quality.items()}, index=index)
     features = join_exogenous_features(
@@ -62,13 +63,13 @@ def test_training_stage_writes_isolated_recoverable_artifacts(tmp_path):
     ).dropna(axis=1, how="all")
     features["feriado"] = exogenous["feriado"]
     features = features.loc[:, envelope["key"].columns]
-    exported = joblib.load(result.output / "modelos" / "Ridge.joblib")
+    exported = joblib.load(series / "modelos" / "Ridge.joblib")
     np.testing.assert_allclose(
         envelope["payload"]["model"].predict(features.iloc[-10:]),
         exported.predict(features.iloc[-10:]),
     )
-    assert list((result.output / "times").glob("*.csv"))
-    assert list((result.output / "traces").glob("*.csv"))
+    assert list((series / "times").glob("*.csv"))
+    assert list((series / "traces").glob("*.csv"))
     assert ManifestStore(layout).read()["stages"]["03_entrenamiento"]["status"] == "SUCCESS"
 
     restarted = run_training(config, layout, model_names=("SeasonalNaive", "Ridge"))
@@ -125,4 +126,6 @@ def test_training_stage_skips_target_without_contiguous_observed_test(tmp_path):
     result = run_training(config, layout, model_names=("Ridge",))
 
     assert result.status == "SUCCESS"
-    assert result.artifacts["target"] == "B_P"
+    assert result.artifacts["entrenadas"] == ["B_P"]
+    assert result.artifacts["no_elegibles"] == ["A_P"]
+    assert (result.output / "csv" / "resumen_series.csv").is_file()
