@@ -20,7 +20,7 @@ from prodma.modeling.adapters import TrainingSlice
 from prodma.modeling.ablation import FeatureSetBundle, compare_feature_sets
 from prodma.modeling.features import join_exogenous_features, make_features
 from prodma.modeling.prefilter import PrefilterPolicy, run_prefilter
-from prodma.modeling.registry import model_registry
+from prodma.modeling.registry import exogenous_compatibility, model_registry
 from prodma.modeling.splits import nested_temporal_partition
 from prodma.modeling.train import build_training_slice, train_approved_models
 from prodma.stages import StageResult
@@ -102,7 +102,8 @@ def _prepare(candidate: str, matrix: pd.DataFrame, quality: pd.DataFrame,
         )
         selected = [column for column in ablation.selected_columns if column in features.columns]
         data = build_training_slice(clean, features.loc[:, selected])
-    return {"clean": clean, "features": features, "data": data, "partition": partition, "ablation": ablation}
+    return {"clean": clean, "features": features, "data": data, "partition": partition, "ablation": ablation,
+            "endogenous_columns": list(endogenous.columns)}
 
 
 def _train_series(target: str, prepared: dict, names: tuple[str, ...], registry: dict, config,
@@ -113,6 +114,18 @@ def _train_series(target: str, prepared: dict, names: tuple[str, ...], registry:
     ablation = prepared.get("ablation")
     if ablation is not None:
         _atomic_csv(ablation.fold_metrics, output / "csv" / "ablacion.csv")
+    selected_exogenous = tuple(column for column in columns if column not in prepared["endogenous_columns"])
+    compatibility = pd.DataFrame([
+        {"serie": target, "modelo": name, "estado": exogenous_compatibility(registry[name], bool(selected_exogenous)),
+         "exogenas": len(selected_exogenous)}
+        for name in names
+    ])
+    _atomic_csv(compatibility, output / "csv" / "compatibilidad_exogenas.csv")
+    incompatible = tuple(compatibility.loc[compatibility["estado"] != "COMPATIBLE", "modelo"])
+    names = tuple(name for name in names if name not in incompatible)
+    if not names:
+        return {"serie": target, "estado": "FALLIDA", "motivo": "ningun modelo compatible con exogenas",
+                "entrenados": 0, "incompatibles": len(incompatible)}
     if _compatible_restart(output, names, matrix_hash, exogenous_hash, columns, config.seed):
         return {"serie": target, "estado": "REUTILIZADA", "motivo": "checkpoints compatibles", "entrenados": len(names)}
     first = partition.inner_folds[0]

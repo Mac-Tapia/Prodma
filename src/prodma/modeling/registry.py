@@ -61,3 +61,12 @@ def model_registry() -> dict[str, ModelSpec]:
         result[name] = ModelSpec(name, _forecast_factory(name), "1h" if name == "LSTM" else "1d",
                                  name == "SARIMAX", "auto" if name == "LSTM" else "cpu", "forecaster")
     return result
+
+
+def exogenous_compatibility(spec: ModelSpec, has_exogenous: bool) -> str:
+    """`sklearn` recibe exogenas en la matriz de diseno; los forecasters solo si las declaran."""
+    if not has_exogenous:
+        return "COMPATIBLE"
+    if spec.family == "sklearn" or spec.supports_exogenous:
+        return "COMPATIBLE"
+    return "INCOMPATIBLE_EXOG"
