@@ -1,13 +1,19 @@
-"""Validacion estructural y temporal de fuentes exogenas."""
+"""Validacion estructural y temporal de fuentes exogenas.
+
+Cada fuente habilitada se valida mediante el validador registrado para su nombre en
+`DEFAULT_VALIDATORS`. Una fuente sin validador produce un error explícito; nunca se omite.
+"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
 
 from prodma.exogenas.contracts import ExogenousCatalog, ExogenousSource
+from prodma.external.registry import SourceRegistry
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,9 @@ class ExogenousValidationReport:
 @dataclass(frozen=True)
 class CalendarValidation:
     warnings: tuple[str, ...]
+
+
+Validator = Callable[[ExogenousSource, pd.DatetimeIndex, str], ValidationItem]
 
 
 def validate_frame(frame: pd.DataFrame, expected_frequency: str, timezone: str,
@@ -82,56 +91,77 @@ def validate_calendar(frame: pd.DataFrame) -> CalendarValidation:
     return CalendarValidation(tuple(warnings))
 
 
-def _read_source(source: ExogenousSource) -> pd.DataFrame:
-    if source.path.suffix.lower() == ".csv":
-        return pd.read_csv(source.path)
-    raise ValueError(f"formato no soportado para validacion: {source.path.suffix}")
+def _read_csv(source: ExogenousSource) -> pd.DataFrame:
+    if source.path.suffix.lower() != ".csv":
+        raise ValueError(f"formato no soportado para validacion: {source.path.suffix}")
+    return pd.read_csv(source.path)
 
 
-def _validate_source(source: ExogenousSource, demand_index: pd.DatetimeIndex, timezone: str) -> ValidationItem:
-    frame = _read_source(source)
-    warnings: list[str] = []
-    if source.name == "calendario_pe":
-        calendar = validate_calendar(frame)
-        warnings.extend(calendar.warnings)
-        checked = validate_frame(frame.rename(columns={"fecha": "fecha_hora"}), "1d", timezone,
-                                 value_columns=source.value_columns)
-        timestamps = checked["fecha_hora"]
-    elif source.name == "temperatura_ica":
-        checked = validate_frame(frame, source.frequency, timezone, value_columns=source.value_columns)
-        allowed = {"reanalisis_no_es_medicion_directa", "interpolado_lineal_desde_horario"}
-        if "calidad" in checked and not set(checked["calidad"].dropna().unique()) <= allowed:
-            raise ValueError("etiqueta de calidad no permitida")
-        timestamps = checked["fecha_hora"]
-    elif source.name == "pbi_bcrp":
-        missing = {"periodo", "valor", "fecha_descarga"} - set(frame)
-        if missing:
-            raise ValueError(f"PBI sin columnas {sorted(missing)}")
-        if not np.isfinite(pd.to_numeric(frame["valor"], errors="coerce")).all():
-            raise ValueError("PBI contiene valor no finito")
-        warnings.append("fecha_disponible_ausente")
-        timestamps = pd.to_datetime(frame["periodo"].str.extract(r"(?P<m>[A-Za-z]{3})\.(?P<y>\d{4})")["y"] + "-01-01")
-    elif source.name == "poblacion_ica":
-        missing = {"fecha", "poblacion", "dato", "fuente"} - set(frame)
-        if missing:
-            raise ValueError(f"poblacion sin columnas {sorted(missing)}")
-        if not np.isfinite(pd.to_numeric(frame["poblacion"], errors="coerce")).all():
-            raise ValueError("poblacion contiene valor no finito")
-        timestamps = pd.to_datetime(frame["fecha"])
-    else:
-        raise ValueError(f"fuente habilitada sin validador: {source.name}")
-    if source.name in {"calendario_pe", "temperatura_ica"}:
-        if timestamps.min() > demand_index.min().normalize() or timestamps.max() < demand_index.max().normalize():
-            raise ValueError("cobertura temporal insuficiente")
+def _check_coverage(timestamps: pd.Series, demand_index: pd.DatetimeIndex) -> None:
+    if timestamps.min() > demand_index.min().normalize() or timestamps.max() < demand_index.max().normalize():
+        raise ValueError("cobertura temporal insuficiente")
+
+
+def _validate_calendar(source: ExogenousSource, demand_index: pd.DatetimeIndex, timezone: str) -> ValidationItem:
+    frame = _read_csv(source)
+    warnings = list(validate_calendar(frame).warnings)
+    checked = validate_frame(frame.rename(columns={"fecha": "fecha_hora"}), "1d", timezone,
+                             value_columns=source.value_columns)
+    timestamps = checked["fecha_hora"]
+    _check_coverage(timestamps, demand_index)
     return ValidationItem(source.name, "VALID", len(frame), str(timestamps.min()), str(timestamps.max()), tuple(warnings))
 
 
-def validate_exogenous_sources(catalog: ExogenousCatalog, demand_index, timezone: str = "America/Lima") -> ExogenousValidationReport:
+def _validate_temperature(source: ExogenousSource, demand_index: pd.DatetimeIndex, timezone: str) -> ValidationItem:
+    frame = _read_csv(source)
+    checked = validate_frame(frame, source.frequency, timezone, value_columns=source.value_columns)
+    allowed = {"reanalisis_no_es_medicion_directa", "interpolado_lineal_desde_horario"}
+    if "calidad" in checked and not set(checked["calidad"].dropna().unique()) <= allowed:
+        raise ValueError("etiqueta de calidad no permitida")
+    timestamps = checked["fecha_hora"]
+    _check_coverage(timestamps, demand_index)
+    return ValidationItem(source.name, "VALID", len(frame), str(timestamps.min()), str(timestamps.max()))
+
+
+def _validate_pbi(source: ExogenousSource, demand_index: pd.DatetimeIndex, timezone: str) -> ValidationItem:
+    frame = _read_csv(source)
+    missing = {"periodo", "valor", "fecha_descarga"} - set(frame)
+    if missing:
+        raise ValueError(f"PBI sin columnas {sorted(missing)}")
+    if not np.isfinite(pd.to_numeric(frame["valor"], errors="coerce")).all():
+        raise ValueError("PBI contiene valor no finito")
+    timestamps = pd.to_datetime(frame["periodo"].str.extract(r"(?P<m>[A-Za-z]{3})\.(?P<y>\d{4})")["y"] + "-01-01")
+    return ValidationItem(source.name, "VALID", len(frame), str(timestamps.min()), str(timestamps.max()),
+                          ("fecha_disponible_ausente",))
+
+
+def _validate_population(source: ExogenousSource, demand_index: pd.DatetimeIndex, timezone: str) -> ValidationItem:
+    frame = _read_csv(source)
+    missing = {"fecha", "poblacion", "dato", "fuente"} - set(frame)
+    if missing:
+        raise ValueError(f"poblacion sin columnas {sorted(missing)}")
+    if not np.isfinite(pd.to_numeric(frame["poblacion"], errors="coerce")).all():
+        raise ValueError("poblacion contiene valor no finito")
+    timestamps = pd.to_datetime(frame["fecha"])
+    return ValidationItem(source.name, "VALID", len(frame), str(timestamps.min()), str(timestamps.max()))
+
+
+DEFAULT_VALIDATORS: SourceRegistry[Validator] = SourceRegistry()
+DEFAULT_VALIDATORS.register("calendario_pe", _validate_calendar)
+DEFAULT_VALIDATORS.register("temperatura_ica", _validate_temperature)
+DEFAULT_VALIDATORS.register("pbi_bcrp", _validate_pbi)
+DEFAULT_VALIDATORS.register("poblacion_ica", _validate_population)
+
+
+def validate_exogenous_sources(catalog: ExogenousCatalog, demand_index, timezone: str = "America/Lima",
+                               registry: SourceRegistry[Validator] | None = None) -> ExogenousValidationReport:
+    registry = registry or DEFAULT_VALIDATORS
     index = pd.DatetimeIndex(demand_index)
     items: list[ValidationItem] = []
     for source in catalog.enabled_sources():
         try:
-            items.append(_validate_source(source, index, timezone))
+            validator = registry.resolve(source.name)
+            items.append(validator(source, index, timezone))
         except Exception as exc:
             items.append(ValidationItem(source.name, "INVALID", 0, None, None, error=f"{type(exc).__name__}: {exc}"))
     report = ExogenousValidationReport(tuple(items), timezone)
