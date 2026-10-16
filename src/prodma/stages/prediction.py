@@ -95,7 +95,7 @@ def run_prediction(config, layout: RunLayout, future_exog: pd.DataFrame | None =
                 continue
             model_name = str(admitted.iloc[0]["modelo"])
             if registry[model_name].family != "sklearn":
-                summary.append({"serie": target, "estado": "NO_SOPORTADO_T16", "modelo": model_name})
+                summary.append({"serie": target, "estado": "NO_SOPORTADO_OPERATIVO_RESOLUCION", "modelo": model_name})
                 continue
             training_dir = training_root / "series" / target
             envelope = joblib.load(training_dir / "checkpoints" / f"{model_name}.joblib")

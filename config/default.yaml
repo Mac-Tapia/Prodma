@@ -104,6 +104,7 @@ training:
 
 evaluation:
   alpha: 0.05
+  coverage_tolerance: 0.05  # desviacion maxima de cobertura para admitir un modelo (96 puntos: estimacion ruidosa)
   minimum_improvement: 0.0
 
 prediction:

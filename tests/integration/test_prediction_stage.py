@@ -23,7 +23,7 @@ def _sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _run_pipeline(tmp_path, name, values, temperature):
+def _run_pipeline(tmp_path, name, values, temperature, models=("Ridge",)):
     base = load_config(ROOT / "config/default.yaml")
     raw = dict(base.raw)
     raw["training"] = {"folds": 2, "min_train": 300, "n_trials": 1}
@@ -48,7 +48,7 @@ def _run_pipeline(tmp_path, name, values, temperature):
         **{key: str(value) for key, value in paths.items()}, "sha256": _sha(paths["matrix"]),
         "exogenous_sha256": _sha(paths["exogenous_historical"]),
     })
-    assert run_training(config, layout, model_names=("Ridge",)).status == "SUCCESS"
+    assert run_training(config, layout, model_names=tuple(models)).status == "SUCCESS"
     assert run_evaluation(config, layout).status == "SUCCESS"
     return config, layout
 
@@ -274,3 +274,17 @@ def test_open_meteo_failure_is_reported_in_the_summary_not_hidden(tmp_path, monk
     assert summary.loc[0, "estado"] == "REQUIERE_EXOGENAS_FUTURAS"
     assert summary.loc[0, "exogenas_futuras"].startswith("ERROR_EXOG_FUTURA")
     assert "limite excedido" in summary.loc[0, "exogenas_futuras"]
+
+
+def test_forecaster_models_are_reported_as_unsupported_at_operational_resolution(tmp_path):
+    rng = np.random.default_rng(31)
+    index_length = 1200
+    values = 100 + 8 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.3, size=index_length)
+    temperature = rng.normal(size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-forecaster-unsupported", values, temperature, models=("SeasonalNaive",))
+
+    result = run_prediction(config, layout)
+
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "NO_SOPORTADO_OPERATIVO_RESOLUCION"
+    assert summary.loc[0, "modelo"] == "SeasonalNaive"
