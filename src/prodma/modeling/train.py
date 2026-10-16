@@ -103,8 +103,10 @@ def _positions(index: pd.DatetimeIndex, timestamps: pd.DatetimeIndex) -> np.ndar
 def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
                           partition: TrainingPartition, checkpoint_dir: Path | str,
                           matrix_sha256: str, exogenous_sha256: str, seed: int,
-                          n_trials: int = 5, selected_feature_set: str = "preselected") -> TrainingResult:
+                          n_trials: int = 5, selected_feature_set: str = "preselected",
+                          exogenous_columns: tuple[str, ...] = ()) -> TrainingResult:
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    exog_frame = data.x.loc[:, list(exogenous_columns)] if exogenous_columns else None
     table_rows: list[dict] = []
     trace_rows: list[dict] = []
     timing_rows: list[dict] = []
@@ -124,11 +126,12 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
                 for fold_number, fold in enumerate(partition.inner_folds):
                     train_positions = _positions(data.y.index, fold.train_index)
                     validation_positions = _positions(data.y.index, fold.validation_index)
-                    training = TrainingSlice(data.x, data.y, train_positions, validation_positions)
+                    training = TrainingSlice(data.x, data.y, train_positions, validation_positions, exog_frame)
                     adapter = ForecastAdapter(trial_spec, seed + trial.number).fit(training)
                     prediction = adapter.predict(ForecastRequest(
                         data.x.iloc[validation_positions], pd.DatetimeIndex(data.y.index[validation_positions]),
                         len(validation_positions),
+                        None if exog_frame is None else exog_frame.iloc[validation_positions],
                     ))
                     rmse = float(np.sqrt(np.mean((data.y.iloc[validation_positions].to_numpy() - prediction.to_numpy()) ** 2)))
                     fold_errors.append(rmse)
@@ -149,7 +152,7 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
             best_spec, best_params = _spec_with_trial(base_spec, study.best_trial)
             calibration_positions = _positions(data.y.index, partition.calibration_index)
             final_adapter = ForecastAdapter(best_spec, seed).fit(
-                TrainingSlice(data.x, data.y, calibration_positions, np.array([], dtype=int))
+                TrainingSlice(data.x, data.y, calibration_positions, np.array([], dtype=int), exog_frame)
             )
             final_prediction_rows.extend(prediction_rows_by_trial.get((name, study.best_trial.number), []))
             final_positions = data.y.index.get_indexer(partition.final_test_index)
@@ -157,6 +160,7 @@ def train_approved_models(specs: dict[str, ModelSpec], data: CleanTrainingData,
                 raise ValueError("test final sin objetivo observado")
             final_prediction = final_adapter.predict(ForecastRequest(
                 data.x.iloc[final_positions], pd.DatetimeIndex(partition.final_test_index), len(final_positions),
+                None if exog_frame is None else exog_frame.iloc[final_positions],
             ))
             final_test_rows.extend(
                 {"timestamp": str(stamp), "modelo": name, "paso": step + 1,

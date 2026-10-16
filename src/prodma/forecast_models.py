@@ -63,17 +63,36 @@ class SeasonalNaiveForecaster(BaseForecaster):
         return _finite(np.resize(season, horizon), horizon)
 
 
+def _checked_exog(columns: list[str] | None, exog: pd.DataFrame | None, horizon: int | None = None) -> pd.DataFrame | None:
+    """Valida exogenas futuras contra las columnas de entrenamiento; None si el modelo no las usa."""
+    if columns is None:
+        if exog is not None:
+            raise ValueError("el modelo fue entrenado sin exogenas y no admite exogenas futuras")
+        return None
+    if exog is None:
+        raise ValueError("el modelo fue entrenado con exogenas y requiere exogenas futuras")
+    if list(exog.columns) != columns or (horizon is not None and len(exog) != horizon):
+        raise ValueError("Las variables exogenas futuras no coinciden con el entrenamiento")
+    if exog.isna().any(axis=None):
+        raise ValueError("Las variables exogenas futuras contienen valores faltantes")
+    return exog.astype(float)
+
+
 @dataclass
 class ARIMAForecaster(BaseForecaster):
     order: tuple[int, int, int] = (1, 1, 0)
 
     def fit(self, y: pd.Series, exog: pd.DataFrame | None = None) -> "ARIMAForecaster":
         self.y_ = _series(y)
-        self.result_ = ARIMA(self.y_, order=self.order).fit()
+        if exog is not None and (len(exog) != len(self.y_) or exog.isna().any(axis=None)):
+            raise ValueError("Variables exogenas invalidas o desalineadas")
+        self.exog_columns_ = None if exog is None else list(exog.columns)
+        self.result_ = ARIMA(self.y_, exog=None if exog is None else exog.astype(float), order=self.order).fit()
         return self
 
     def predict(self, horizon: int, exog: pd.DataFrame | None = None) -> np.ndarray:
-        return _finite(self.result_.forecast(steps=horizon), horizon)
+        future = _checked_exog(self.exog_columns_, exog, horizon)
+        return _finite(self.result_.forecast(steps=horizon, exog=future), horizon)
 
 
 @dataclass
@@ -86,9 +105,13 @@ class SARIMAForecaster(BaseForecaster):
         self.y_ = _series(y)
         if len(self.y_) < 2 * self.seasonal_periods:
             raise ValueError("SARIMA requiere al menos dos ciclos estacionales")
+        if exog is not None and (len(exog) != len(self.y_) or exog.isna().any(axis=None)):
+            raise ValueError("Variables exogenas invalidas o desalineadas")
+        self.exog_columns_ = None if exog is None else list(exog.columns)
         seasonal_order = (*self.seasonal_order_base, self.seasonal_periods)
         self.result_ = SARIMAX(
             self.y_,
+            exog=None if exog is None else exog.astype(float),
             order=self.order,
             seasonal_order=seasonal_order,
             enforce_stationarity=False,
@@ -97,7 +120,8 @@ class SARIMAForecaster(BaseForecaster):
         return self
 
     def predict(self, horizon: int, exog: pd.DataFrame | None = None) -> np.ndarray:
-        return _finite(self.result_.forecast(steps=horizon), horizon)
+        future = _checked_exog(self.exog_columns_, exog, horizon)
+        return _finite(self.result_.forecast(steps=horizon, exog=future), horizon)
 
 
 @dataclass

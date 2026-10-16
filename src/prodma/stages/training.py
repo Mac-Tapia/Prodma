@@ -144,6 +144,7 @@ def _train_series(target: str, prepared: dict, names: tuple[str, ...], registry:
         {name: registry[name] for name in approved}, data, partition,
         output / "checkpoints", matrix_hash, exogenous_hash, config.seed,
         int(training_cfg.get("n_trials", 5)), selected_feature_set="endogenas_mas_exogenas_asof",
+        exogenous_columns=selected_exogenous,
     )
     _atomic_csv(trained.table, output / "csv" / "entrenamientos.csv")
     _atomic_csv(trained.timings, output / "times" / "tiempos.csv")

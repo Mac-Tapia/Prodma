@@ -59,7 +59,7 @@ def model_registry() -> dict[str, ModelSpec]:
     )
     for name in ("ARIMA", "SARIMA", "SARIMAX", "HoltWinters", "Prophet", "LSTM"):
         result[name] = ModelSpec(name, _forecast_factory(name), "1h" if name == "LSTM" else "1d",
-                                 name == "SARIMAX", "auto" if name == "LSTM" else "cpu", "forecaster")
+                                 name in {"ARIMA", "SARIMA", "SARIMAX"}, "auto" if name == "LSTM" else "cpu", "forecaster")
     return result
 
 
