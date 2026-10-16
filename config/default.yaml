@@ -8,7 +8,10 @@ horizons: [96, 672, 2688]
 inputs:
   historical_dir: datahistorica
   new_customers_dir: nuevosclientes
-  years: [2023, 2024, 2025, 2026]
+  external_dir: variables_externas
+  # Obligatorio: sin catálogo autorizado no inicia la ingesta (fallo cerrado).
+  authorized_catalog: medidoralimentador.xlsx
+  # Sin lista de años: los libros demanda<AAAA>.xls[x] se descubren por contenido.
 
 cleaning:
   forward_fill_limit: 4

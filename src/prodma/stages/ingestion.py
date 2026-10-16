@@ -9,6 +9,14 @@ from pathlib import Path
 
 from prodma.artifacts import RunLayout
 from prodma.config import PipelineConfig
+from prodma.custody.authorized import build_authorized_catalog, write_authorized_catalog
+from prodma.custody.inventory import (
+    BLOCKING_STATES,
+    MISSING_EXPECTED,
+    CustodyBlockedError,
+    discover_inputs,
+    write_inventory,
+)
 from prodma.ingesta.excel import ingestar_libro
 from prodma.exogenas.new_customers import ingest_new_customers, write_new_customer_audit
 from prodma.stages import StageResult
@@ -55,17 +63,66 @@ def discover_historical_files(directory: Path | str, years) -> list[Path]:
     return found
 
 
+def discover_all_historical_files(directory: Path | str) -> list[Path]:
+    """Todos los libros anuales presentes, sin lista fija de años (orden cronológico)."""
+    directory = Path(directory)
+    by_year: dict[int, list[Path]] = {}
+    for path in directory.glob("demanda*.xls*"):
+        year = _extract_year(path)
+        if year is not None:
+            by_year.setdefault(year, []).append(path)
+    found: list[Path] = []
+    for year in sorted(by_year):
+        existing = sorted(by_year[year])
+        if len(existing) > 1:
+            raise ValueError(f"Archivos ambiguos para {year}: {', '.join(p.name for p in existing)}")
+        found.append(existing[0])
+    if not found:
+        raise FileNotFoundError(f"No hay libros demanda<AAAA>.xls[x] en {directory}")
+    return found
+
+
 def _serializable_record(record: InputRecord) -> dict:
     payload = asdict(record)
     payload["path"] = str(record.path)
     return payload
 
 
+def _publish_custody(config: PipelineConfig, layout: RunLayout, inputs: dict) -> dict:
+    """Inventario y catálogo autorizado en 00_custodia; falla cerrada si algo bloquea."""
+    custody_dir = layout.root / "00_custodia"
+    roots = [
+        config.project_root / inputs.get("historical_dir", "datahistorica"),
+        config.project_root / inputs.get("new_customers_dir", "nuevosclientes"),
+        config.project_root / inputs.get("external_dir", "variables_externas"),
+    ]
+    catalog_setting = inputs.get("authorized_catalog")
+    expected = [config.project_root / catalog_setting] if catalog_setting else []
+    inventory = discover_inputs(roots, expected_paths=expected)
+    if not inventory.accepted:
+        blocked = [
+            f"{entry.path}: {entry.estado} ({entry.motivo})"
+            for entry in inventory.entries if entry.estado in BLOCKING_STATES
+        ] + [f"{missing}: {MISSING_EXPECTED}" for missing in inventory.expected_missing]
+        raise CustodyBlockedError("Inventario no aceptado: " + "; ".join(blocked))
+    published = write_inventory(inventory, custody_dir)
+    result: dict = {"inventario": published["inventario"], "resumen": published["resumen"]}
+    if catalog_setting:
+        catalog = build_authorized_catalog(config.project_root / catalog_setting)
+        authorized = write_authorized_catalog(catalog, custody_dir)
+        result.update(catalogo=authorized["parquet"], catalogo_sha256=authorized["sha256"],
+                      catalogo_resumen=authorized["summary"])
+    return result
+
+
 def run_ingestion(config: PipelineConfig, layout: RunLayout) -> StageResult:
     inputs = config.raw.get("inputs", {})
     source_dir = config.project_root / inputs.get("historical_dir", "datahistorica")
-    years = tuple(int(year) for year in inputs.get("years", (2023, 2024, 2025, 2026)))
-    files = discover_historical_files(source_dir, years)
+    custody = _publish_custody(config, layout, inputs)
+    if inputs.get("years") is None:
+        files = discover_all_historical_files(source_dir)
+    else:
+        files = discover_historical_files(source_dir, tuple(int(year) for year in inputs["years"]))
     fingerprints = [fingerprint_input(path) for path in files]
     parquet_dir = layout.stage("01_ingesta", "parquet")
     audit_dir = layout.stage("01_ingesta", "auditoria")
@@ -104,5 +161,6 @@ def run_ingestion(config: PipelineConfig, layout: RunLayout) -> StageResult:
             "parquet": [row["path"] for row in successful],
             "auditoria": [str(audit_dir / f"{Path(row['path']).stem}.json") for row in successful],
             "new_customers": new_customer_records,
+            "custodia": custody,
         },
     )
