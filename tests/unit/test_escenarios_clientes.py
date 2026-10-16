@@ -88,3 +88,32 @@ def test_increments_work_with_apply_scenarios_end_to_end():
     assert set(result["escenario"]) == {"base", "inferior", "central", "superior"}
     total = result.set_index(["escenario", "timestamp"])["prediccion_total"]
     assert total.loc[("central", stamps[-1])] == 110.0  # todos los pasos son de 2026: solo cuenta el incremento 2026
+
+
+def test_default_ramp_and_coincidence_reproduce_the_step_behaviour():
+    stamps = pd.DatetimeIndex(["2026-01-01 00:00", "2026-07-01 00:00"])
+    result = customer_increments(_customer_table(), "M1", stamps).set_index(["escenario", "timestamp"])
+    assert result.loc[("central", stamps[0]), "incremento"] == 10.0
+    assert result.loc[("central", stamps[1]), "incremento"] == 10.0
+
+
+def test_ramp_enters_linearly_during_the_first_months_of_the_year():
+    stamps = pd.DatetimeIndex([pd.Timestamp("2026-01-01") + pd.Timedelta(days=182.625 / 2)])
+    result = customer_increments(_customer_table(), "M1", stamps, ramp_months=6).set_index("escenario")
+    assert result.loc["central", "incremento"] == pytest.approx(5.0, rel=1e-3)
+
+
+def test_ramp_is_complete_after_its_duration():
+    stamps = pd.DatetimeIndex([pd.Timestamp("2026-08-01")])
+    result = customer_increments(_customer_table(), "M1", stamps, ramp_months=6).set_index("escenario")
+    assert result.loc["central", "incremento"] == 10.0
+
+
+def test_coincidence_factor_scales_increments_and_is_validated():
+    stamps = pd.DatetimeIndex([pd.Timestamp("2026-08-01")])
+    result = customer_increments(_customer_table(), "M1", stamps, coincidence=0.8).set_index("escenario")
+    assert result.loc["central", "incremento"] == pytest.approx(8.0)
+    with pytest.raises(ValueError):
+        customer_increments(_customer_table(), "M1", stamps, coincidence=1.5)
+    with pytest.raises(ValueError):
+        customer_increments(_customer_table(), "M1", stamps, coincidence=0.0)

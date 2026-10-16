@@ -81,7 +81,12 @@ def run_prediction(config, layout: RunLayout) -> StageResult:
                 if meter in set(customer_table["medidor"].astype(str)):
                     base = pd.DataFrame({"timestamp": pd.to_datetime(forecast["timestamp"]),
                                          "prediccion": forecast["prediccion"].to_numpy()})
-                    increments = customer_increments(customer_table, meter, base["timestamp"])
+                    customers_cfg = config.raw.get("clientes", {})
+                    increments = customer_increments(
+                        customer_table, meter, base["timestamp"],
+                        ramp_months=float(customers_cfg.get("rampa_meses", 0.0)),
+                        coincidence=float(customers_cfg.get("coincidencia", 1.0)),
+                    )
                     scenarios = apply_scenarios(base, increments)
                     _atomic_csv(scenarios, output_root / "series" / target / "csv" / "pronostico_escenarios.csv")
                     scenario_state = "ESCENARIOS_APLICADOS"
