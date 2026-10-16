@@ -7,8 +7,8 @@ Cada tarea termina con pruebas focalizadas y un commit independiente.
 - [x] T02 - Custodia e inventario completos: descubrimiento sin años fijos y hashes (S011-FR-002, S011-FR-016).
 - [x] T03 - Registro genérico de conectores, snapshots y estados terminales (S011-FR-001, S011-FR-003).
 - [x] T04 - Calendario peruano verificable con norma oficial (S011-FR-017).
-- [ ] T05 - Clima multiubicación con políticas separadas de histórico, operación y planeamiento (S011-FR-005, S011-FR-004).
-- [ ] T06 - Economía BCRP con vintages o rezago conservador (S011-FR-004, S011-FR-006).
+- [x] T05 - Clima multiubicación con políticas separadas de histórico, operación y planeamiento (S011-FR-005, S011-FR-004).
+- [x] T06 - Economía BCRP con vintages o rezago conservador (S011-FR-004, S011-FR-006).
 - [ ] T07 - Población y producción regional INEI con etiquetas oficiales (S011-FR-007).
 - [ ] T08 - Clientes realizados y escenarios confirmados separados (S011-FR-001, S011-FR-008).
 - [ ] T09 - Matrices exógenas reconciliadas con estados y procedencia (S011-FR-004, S011-FR-014).

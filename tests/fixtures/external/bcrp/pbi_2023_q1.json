@@ -1,0 +1,27 @@
+{
+"config":
+{
+"title":"Producto bruto interno y demanda interna (índice 2007 = 100)",
+"series":
+[
+{
+"name":"Producto bruto interno y demanda interna (índice 2007 = 100) - PBI Desestacionalizado - mensual",
+"dec":"1"
+}]
+},
+"periods":
+[
+{
+"name":"Ene.2023",
+"values":["175.538186117904"]
+},
+{
+"name":"Feb.2023",
+"values":["176.209312526868"]
+},
+{
+"name":"Mar.2023",
+"values":["176.968791266741"]
+}
+]
+}
