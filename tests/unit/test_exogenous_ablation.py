@@ -31,5 +31,5 @@ def test_stable_exogenous_signal_is_selected():
     endogenous = pd.DataFrame({"lag_1": y.shift(1).fillna(0)})
     exogenous = pd.DataFrame({"feriado": np.zeros(n), "temp_climatologica_c": temperature})
     result = compare_feature_sets(FeatureSetBundle(endogenous, y), exogenous, _folds(n), minimum_improvement=0.01)
-    assert result.selected == "calendar_weather"
-    assert result.fold_metrics.query("feature_set == 'calendar_weather'").shape[0] == 3
+    assert result.selected == "weather"
+    assert result.fold_metrics.query("feature_set == 'weather'").shape[0] == 3

@@ -33,15 +33,24 @@ def _positions(fold) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(fold.train_index), np.asarray(fold.validation_index)
 
 
-def _candidate_columns(exogenous: pd.DataFrame) -> dict[str, list[str]]:
-    calendar_tokens = ("feriado", "fin_semana", "no_laborable", "hora_", "dia_", "anio_")
-    calendar = [column for column in exogenous if column.startswith(calendar_tokens)]
-    weather = [column for column in exogenous if column.startswith(("temp_", "temperatura_"))]
+CALENDAR_TOKENS = ("feriado", "fin_semana", "no_laborable", "hora_", "dia_", "anio_")
+WEATHER_TOKENS = ("temp_", "temperatura_")
+ABLATION_ORDER = ("calendar", "weather", "calendar_weather", "socioeconomic", "all_eligible")
+
+
+def feature_set_columns(exogenous: pd.DataFrame) -> dict[str, list[str]]:
+    """Grupos de exogenas. Cada columna elegible pertenece a un grupo o a `socioeconomic`."""
+    calendar = [column for column in exogenous if column.startswith(CALENDAR_TOKENS)]
+    weather = [column for column in exogenous if column.startswith(WEATHER_TOKENS)]
+    grouped = set(calendar) | set(weather)
+    socioeconomic = [column for column in exogenous if column not in grouped]
     return {
         "endogenous_only": [],
         "calendar": calendar,
+        "weather": weather,
         "calendar_weather": list(dict.fromkeys(calendar + weather)),
-        "all_available_asof": list(exogenous.columns),
+        "socioeconomic": socioeconomic,
+        "all_eligible": list(exogenous.columns),
     }
 
 
@@ -49,7 +58,7 @@ def compare_feature_sets(base: FeatureSetBundle, exogenous: pd.DataFrame, folds,
                          minimum_improvement: float = 0.0) -> AblationResult:
     if not base.endogenous.index.equals(base.y.index) or not exogenous.index.equals(base.y.index):
         raise ValueError("features y objetivo deben compartir indice y orden")
-    candidates = _candidate_columns(exogenous)
+    candidates = feature_set_columns(exogenous)
     rows: list[dict] = []
     errors: dict[str, list[float]] = {name: [] for name in candidates}
     for name, columns in candidates.items():
@@ -63,8 +72,7 @@ def compare_feature_sets(base: FeatureSetBundle, exogenous: pd.DataFrame, folds,
             errors[name].append(rmse)
             rows.append({"feature_set": name, "fold": fold_number, "RMSE": rmse, "columns": len(x.columns)})
     selected = "endogenous_only"
-    order = ("calendar", "calendar_weather", "all_available_asof")
-    for name in order:
+    for name in ABLATION_ORDER:
         current = np.asarray(errors[selected])
         candidate = np.asarray(errors[name])
         relative = (current.mean() - candidate.mean()) / max(current.mean(), np.finfo(float).eps)
