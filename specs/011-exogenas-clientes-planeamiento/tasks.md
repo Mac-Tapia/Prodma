@@ -6,7 +6,7 @@ Cada tarea termina con pruebas focalizadas y un commit independiente.
 - [x] T01 - Congelar alcance, Spec 011 y cobertura automatizada (S011-FR-001, S011-FR-014, S011-FR-016, S011-FR-018).
 - [x] T02 - Custodia e inventario completos: descubrimiento sin años fijos y hashes (S011-FR-002, S011-FR-016).
 - [x] T03 - Registro genérico de conectores, snapshots y estados terminales (S011-FR-001, S011-FR-003).
-- [ ] T04 - Calendario peruano verificable con norma oficial (S011-FR-017).
+- [x] T04 - Calendario peruano verificable con norma oficial (S011-FR-017).
 - [ ] T05 - Clima multiubicación con políticas separadas de histórico, operación y planeamiento (S011-FR-005, S011-FR-004).
 - [ ] T06 - Economía BCRP con vintages o rezago conservador (S011-FR-004, S011-FR-006).
 - [ ] T07 - Población y producción regional INEI con etiquetas oficiales (S011-FR-007).
