@@ -17,7 +17,8 @@ from prodma.config import PipelineConfig
 from prodma.exogenas.asof import asof_values
 from prodma.exogenas.contracts import ExogenousCatalog
 from prodma.exogenas.weather import build_weather_features
-from prodma.variables_externas import cargar_pbi_mensual, poblacion_en_fecha
+from prodma.external.connectors.bcrp import parse_period_name, publication_calendar
+from prodma.variables_externas import poblacion_en_fecha
 
 
 @dataclass(frozen=True)
@@ -52,17 +53,34 @@ def _calendar_features(path: Path, index: pd.DatetimeIndex) -> pd.DataFrame:
     return result
 
 
-def _pbi_vintages(path: Path) -> pd.DataFrame:
+def _pbi_vintages(path: Path, lag_months: int | None) -> pd.DataFrame:
+    """Disponibilidad = periodo + rezago declarado. La fecha de descarga nunca define disponibilidad."""
     raw = pd.read_csv(path)
-    series = cargar_pbi_mensual(path)
-    download = pd.to_datetime(raw["fecha_descarga"], errors="coerce")
-    if download.isna().any():
-        raise ValueError("PBI sin fecha_descarga valida")
-    return pd.DataFrame({
-        "periodo": series.index,
-        "valor": series.to_numpy(dtype=float),
-        "fecha_disponible": download.to_numpy(),
+    periods = pd.DataFrame({
+        "periodo": [parse_period_name(name) for name in raw["periodo"]],
+        "valor": pd.to_numeric(raw["valor"], errors="coerce").astype(float),
     })
+    download = str(raw["fecha_descarga"].iloc[0])
+    calendar = publication_calendar(periods, lag_months=lag_months, fecha_descarga=download)
+    return calendar[["periodo", "valor", "fecha_disponible"]]
+
+
+def collinearity_report(frame: pd.DataFrame, threshold: float = 0.9) -> pd.DataFrame:
+    """Pares de variables numéricas con correlación de Pearson en filas comunes."""
+    numeric = frame.select_dtypes(include=[np.number])
+    rows = []
+    columns = list(numeric.columns)
+    for i, first in enumerate(columns):
+        for second in columns[i + 1:]:
+            pair = numeric[[first, second]].dropna()
+            if len(pair) < 3 or pair[first].std() == 0 or pair[second].std() == 0:
+                rows.append({"variable_a": first, "variable_b": second, "correlacion": np.nan,
+                             "estado": "SIN_VARIACION_O_DATOS_COMUNES"})
+                continue
+            value = float(pair[first].corr(pair[second]))
+            rows.append({"variable_a": first, "variable_b": second, "correlacion": value,
+                         "estado": "REVISAR_COLINEALIDAD" if abs(value) >= threshold else "ACEPTABLE"})
+    return pd.DataFrame(rows, columns=["variable_a", "variable_b", "correlacion", "estado"])
 
 
 def _historical_asof(index: pd.DatetimeIndex, vintages: pd.DataFrame) -> pd.Series:
@@ -103,7 +121,7 @@ def build_exogenous_matrices(config: PipelineConfig, catalog: ExogenousCatalog,
     historical["temp_climatologica_c"] = weather_features.climatology.reindex(historical_index)
     future["temp_climatologica_c"] = weather_features.climatology.reindex(future_index)
 
-    vintages = _pbi_vintages(pbi_source.path)
+    vintages = _pbi_vintages(pbi_source.path, pbi_source.publication_lag_months)
     historical["pbi_last_known"] = _historical_asof(historical_index, vintages)
     execution_origin = pd.Timestamp(vintages["fecha_disponible"].max())
     future["pbi_last_known"] = asof_values(future_index, vintages, execution_origin)
@@ -170,6 +188,7 @@ def publish_exogenous_matrices(matrices: ExogenousMatrices, layout: RunLayout,
                                        ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     summary = _summary(matrices.historical, demand)
     summary.to_csv(stats_dir / "exogenas_resumen.csv", index=False)
+    collinearity_report(matrices.historical).to_csv(stats_dir / "colinealidad_exogenas.csv", index=False)
 
     figure, axis = plt.subplots(figsize=(8, 4))
     axis.bar(summary["variable"], summary["cobertura_pct"])

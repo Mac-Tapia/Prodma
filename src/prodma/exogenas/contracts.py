@@ -16,6 +16,7 @@ class ExogenousSource:
     source_url: str
     sha256: str
     enabled: bool = True
+    publication_lag_months: int | None = None
 
 
 @dataclass(frozen=True)

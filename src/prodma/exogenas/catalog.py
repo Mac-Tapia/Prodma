@@ -34,5 +34,6 @@ def build_exogenous_catalog(config: PipelineConfig) -> ExogenousCatalog:
             source_url=str(record.get("source_url", "")),
             sha256=_sha256(path) if enabled else "",
             enabled=enabled,
+            publication_lag_months=record.get("publication_lag_months"),
         ))
     return ExogenousCatalog(tuple(sources))

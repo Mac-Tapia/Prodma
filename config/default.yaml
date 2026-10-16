@@ -43,6 +43,9 @@ exogenous:
       value_columns: [valor]
       availability: publication_lag
       future_policy: last_known
+      # Rezago conservador declarado: el PBI de un periodo se considera publicado periodo + 3 meses.
+      # La fecha de descarga NO define disponibilidad.
+      publication_lag_months: 3
       source_url: https://estadisticas.bcrp.gob.pe/estadisticas/series/mensuales/resultados/PN01773AM/html
       enabled: true
     poblacion_ica:
@@ -61,6 +64,8 @@ exogenous:
       future_policy: scenario_only
       source_url: internal://electro-dunas/clientes-confirmados
       enabled: false
+      estado: SCENARIO_ONLY
+      motivo: escenario de planeamiento confirmado; no entra a la historia ni al entrenamiento
     produccion_regional:
       path: variables_externas/produccion_regional/produccion_regional.csv
       frequency: 1M
@@ -69,7 +74,28 @@ exogenous:
       future_policy: scenario_only
       source_url: https://www.gob.pe/institucion/inei/informes-publicaciones/7567597
       enabled: false
-
+      estado: BLOCKED_MISSING_SOURCE
+      motivo: sin tabla oficial verificada de produccion regional de Ica; INEI no accesible en la verificacion
+    senamhi_ica:
+      path: variables_externas/senamhi/senamhi_ica_verificado.csv
+      frequency: 1h
+      value_columns: [temperatura_c]
+      availability: historical_only
+      future_policy: climatology
+      source_url: https://www.senamhi.gob.pe/main.php?dp=ica&p=estaciones
+      enabled: false
+      estado: BLOCKED_MISSING_SOURCE
+      motivo: la web de datos hidrometeorologicos de Ica requiere descarga interactiva sin API documentada; falta exportacion verificada
+    nasa_power:
+      path: variables_externas/_raw/nasa_power/2026-10-15/respuesta.raw
+      frequency: 1h
+      value_columns: [temperatura_c]
+      availability: historical_only
+      future_policy: climatology
+      source_url: https://power.larc.nasa.gov/docs/services/api/temporal/hourly/
+      enabled: false
+      estado: REJECTED_WITH_EVIDENCE
+      motivo: sesgo medio de -2.26 C frente a ERA5 (Open-Meteo) y correlacion 0.71 en 2023-2026; se mantiene solo como fallback de menor prioridad
 training:
   prefilter_max_seconds: 300
   seed: 42

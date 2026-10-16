@@ -59,3 +59,7 @@ def publication_calendar(periods: pd.DataFrame, *, lag_months: int, fecha_descar
     calendar["politica_disponibilidad"] = f"rezago_conservador_{lag_months}m"
     calendar["fecha_descarga"] = fecha_descarga
     return calendar
+
+
+def parse_period_name(name: str) -> pd.Timestamp:
+    return _period(name)
