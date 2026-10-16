@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Cumplir `.specify/memory/constitution.md` y los 82 requisitos `Snnn-FR-nnn`.
+- Cumplir `.specify/memory/constitution.md` y todos los requisitos `Snnn-FR-nnn` descubiertos en `specs/`.
 - Tratar `datahistorica/`, `nuevosclientes/`, `variables_externas/` y archivos raíz declarados como solo lectura.
 - Mantener Python 3.11, frecuencia `15min` y zona `America/Lima`.
 - Descubrir todos los archivos actuales y futuros; no usar una lista fija de años.
@@ -83,7 +83,7 @@
 | S010-FR-006 | 010-T04 |
 | S010-FR-007..008 | 010-T05 |
 
-La validación de 010-T04 debe expandir estos rangos y fallar si cualquiera de los 82 identificadores queda sin prueba o evidencia.
+La validación de 010-T04 debe descubrir los identificadores `Snnn-FR-nnn` desde `specs/` y fallar si cualquiera queda sin prueba o evidencia.
 
 ## Execution gates
 

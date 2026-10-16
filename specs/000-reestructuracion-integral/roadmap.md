@@ -45,6 +45,7 @@ controlar el flujo desde React sin cambiar la finalidad eléctrica de Prodma.
 | 8 | `008-frontend-react` | Control y visualización local | 007 |
 | 9 | `009-agentes-contexto-memoria` | Instrucciones y contexto progresivo | 001–008 |
 | 10 | `010-migracion-convergencia` | Sustitución segura del notebook productivo | 001–009 |
+| 11 | `011-exogenas-clientes-planeamiento` | Estados terminales de fuentes, causalidad as-of, clientes como escenario y trazabilidad diagnóstica | 001–010 |
 
 Cada sub-spec tendrá su propio `plan.md` y `tasks.md` después de ser revisada y
 aprobada. La implementación avanzará en el orden indicado; una spec puede preparar
