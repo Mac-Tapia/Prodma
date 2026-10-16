@@ -162,3 +162,23 @@ def test_prediction_stage_publishes_client_scenarios_on_top_of_operational_forec
     np.testing.assert_allclose(central - base, 5.0)
     summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
     assert summary.loc[0, "escenarios"] == "ESCENARIOS_APLICADOS"
+
+
+def test_conditional_coverage_for_exogenous_models_is_labelled_and_never_ranked(tmp_path):
+    rng = np.random.default_rng(26)
+    index_length = 1200
+    temperature = 20 + 6 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.2, size=index_length)
+    values = 100 + 9 * (temperature - 20) + rng.normal(scale=0.5, size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-conditional-coverage", values, temperature)
+
+    result = run_prediction(config, layout)
+
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "REQUIERE_EXOGENAS_FUTURAS"
+    table = pd.read_csv(result.output / "series" / "M1_P" / "csv" / "calibracion_condicionada_exogenas.csv")
+    assert set(table["horizonte"]) == {24, 96}
+    assert (table["n"] == 96).all()
+    assert set(table["condicion"]) == {"EXOGENAS_REALIZADAS"}
+    assert table["cobertura"].between(0, 1).all()
+    ranking = pd.read_csv(layout.stage("04_evaluacion") / "series" / "M1_P" / "csv" / "ranking.csv").set_index("modelo")
+    assert ranking.loc["Ridge", "calibracion"] == "NO_EVALUADA"

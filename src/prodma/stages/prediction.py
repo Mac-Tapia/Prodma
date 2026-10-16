@@ -62,6 +62,24 @@ def run_prediction(config, layout: RunLayout) -> StageResult:
             compatibility = pd.read_csv(training_dir / "csv" / "compatibilidad_exogenas.csv")
             row = compatibility.loc[compatibility["modelo"] == model_name].iloc[0]
             if int(row["exogenas"]) > 0 and bool(row["exogenas_usadas"]):
+                exog_path = Path(stage_two.get("artifacts", {}).get("exogenous_historical", ""))
+                if registry[model_name].family == "sklearn" and exog_path.is_file():
+                    envelope = joblib.load(training_dir / "checkpoints" / f"{model_name}.joblib")
+                    columns = list(envelope["key"].columns)
+                    model = joblib.load(training_dir / "modelos" / f"{model_name}.joblib")
+                    clean = _quality_for_target(quality, target)
+                    exog_full = pd.read_parquet(exog_path)
+                    final_stamps = pd.to_datetime(
+                        pd.read_csv(training_dir / "csv" / "predicciones_test_final.csv")["timestamp"])
+                    alpha = float(config.raw.get("evaluation", {}).get("alpha", 0.1))
+                    conditional = pd.concat([
+                        calibrate_rolling(
+                            origin_forecasts(model, columns, clean, final_stamps, int(h), exog=exog_full),
+                            int(h), alpha)
+                        for h in sorted(config.horizons)
+                    ], ignore_index=True)
+                    conditional["condicion"] = "EXOGENAS_REALIZADAS"
+                    _atomic_csv(conditional, output_root / "series" / target / "csv" / "calibracion_condicionada_exogenas.csv")
                 summary.append({"serie": target, "estado": "REQUIERE_EXOGENAS_FUTURAS", "modelo": model_name})
                 continue
             if registry[model_name].family != "sklearn":
