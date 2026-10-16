@@ -1,0 +1,13 @@
+{
+  "fuente": "open_meteo_archive",
+  "url": "https://archive-api.open-meteo.com/v1/archive?latitude=-14.0678&longitude=-75.7286&start_date=2023-01-01&end_date=2026-09-11&hourly=temperature_2m&timezone=America%2FLima",
+  "fecha_descarga": "2026-10-15",
+  "sha256": "724e170e3a77346ab7597270963fd60f85a898dea116eb9f01f12e5d3a39f0e4",
+  "tamano": 777828,
+  "licencia": "Open-Meteo: CC BY 4.0 (datos ERA5 de Copernicus)",
+  "schema_version": "1",
+  "fuente_url": "https://open-meteo.com/en/docs/historical-weather-api",
+  "cabeceras": {
+    "content-length": "777828"
+  }
+}

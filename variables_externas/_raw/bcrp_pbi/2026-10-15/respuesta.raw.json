@@ -1,0 +1,13 @@
+{
+  "fuente": "bcrp_pbi",
+  "url": "https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PN01773AM/json/2023-01/2026-09",
+  "fecha_descarga": "2026-10-15",
+  "sha256": "c43a5b2440a586522c33accf15a831bdb9eb3f849cb94b0c61c4df57418ba2f3",
+  "tamano": 2557,
+  "licencia": "BCRPData: términos de uso del BCRP",
+  "schema_version": "1",
+  "fuente_url": "https://estadisticas.bcrp.gob.pe/estadisticas/series/",
+  "cabeceras": {
+    "content-length": "2557"
+  }
+}

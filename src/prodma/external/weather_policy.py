@@ -83,3 +83,33 @@ def classify_weather(
         "temperatura_pronostico_c": forecast_col,
         "temperatura_climatologia_c": climatology_col,
     })
+
+HISTORICAL_PRIORITY = ("senamhi", "open_meteo_archive", "nasa_power")
+
+
+def choose_historical_source(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Une fuentes históricas por prioridad explícita; la fuente de menor prioridad solo rellena faltantes.
+
+    Cada fila lleva `fuente_seleccionada`, así el origen de cada valor queda trazable.
+    """
+    unknown = sorted(set(frames) - set(HISTORICAL_PRIORITY))
+    if unknown:
+        raise ValueError(f"fuente histórica sin prioridad declarada: {unknown}")
+    ordered = [name for name in HISTORICAL_PRIORITY if name in frames]
+    if not ordered:
+        raise ValueError("no hay fuentes históricas")
+    instants = pd.DatetimeIndex(sorted(set().union(*[set(pd.to_datetime(frames[n]["fecha_hora"])) for n in ordered])))
+    values = pd.Series(np.nan, index=instants, dtype=float)
+    chosen = pd.Series(None, index=instants, dtype=object)
+    for name in ordered:
+        source = frames[name].assign(fecha_hora=lambda f: pd.to_datetime(f["fecha_hora"]))
+        source = source.drop_duplicates("fecha_hora").set_index("fecha_hora")["temperatura_c"].astype(float)
+        candidates = source.reindex(instants)
+        fill = values.isna() & candidates.notna()
+        values[fill] = candidates[fill]
+        chosen[fill] = name
+    return pd.DataFrame({
+        "fecha_hora": instants,
+        "temperatura_c": values.to_numpy(),
+        "fuente_seleccionada": chosen.to_numpy(),
+    })

@@ -1,0 +1,13 @@
+{
+  "fuente": "nasa_power",
+  "url": "https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=T2M&community=RE&longitude=-75.7286&latitude=-14.0678&start=20230101&end=20260911&format=JSON",
+  "fecha_descarga": "2026-10-15",
+  "sha256": "507095986e921a7d1c3b2341a7b8c82c99b8de08fda8dc080bb14b57434b7ec4",
+  "tamano": 612785,
+  "licencia": "NASA POWER: datos públicos NASA",
+  "schema_version": "1",
+  "fuente_url": "https://power.larc.nasa.gov/docs/services/api/temporal/hourly/",
+  "cabeceras": {
+    "content-length": "612785"
+  }
+}
