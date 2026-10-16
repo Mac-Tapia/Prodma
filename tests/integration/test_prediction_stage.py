@@ -182,3 +182,48 @@ def test_conditional_coverage_for_exogenous_models_is_labelled_and_never_ranked(
     assert table["cobertura"].between(0, 1).all()
     ranking = pd.read_csv(layout.stage("04_evaluacion") / "series" / "M1_P" / "csv" / "ranking.csv").set_index("modelo")
     assert ranking.loc["Ridge", "calibracion"] == "NO_EVALUADA"
+
+
+def _future_temperature(stamps, shift):
+    phase = np.arange(len(stamps)) + 1200
+    return pd.DataFrame({"temperatura_c": 20 + 6 * np.sin(phase * 2 * np.pi / 96) + shift}, index=stamps)
+
+
+def test_exogenous_model_forecasts_when_future_exogenous_is_provided_and_responds_to_it(tmp_path):
+    rng = np.random.default_rng(27)
+    index_length = 1200
+    temperature = 20 + 6 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.2, size=index_length)
+    values = 100 + 9 * (temperature - 20) + rng.normal(scale=0.5, size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-future-exog", values, temperature)
+    config = _with_tolerance(config, layout, 0.5)
+    stamps = pd.date_range(pd.Timestamp("2025-01-01") + pd.Timedelta(minutes=15 * index_length), periods=96, freq="15min")
+
+
+    warm = run_prediction(config, layout, future_exog=_future_temperature(stamps, 0.0))
+    summary = pd.read_csv(warm.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "PRONOSTICADA"
+    assert summary.loc[0, "exogenas_futuras"] == "PROVISTAS"
+    low = pd.read_csv(warm.output / "series" / "M1_P" / "csv" / "pronostico_operativo.csv")["prediccion"].to_numpy()
+    assert len(low) == 96 and np.isfinite(low).all()
+
+    hot = run_prediction(config, layout, future_exog=_future_temperature(stamps, 5.0))
+    high = pd.read_csv(hot.output / "series" / "M1_P" / "csv" / "pronostico_operativo.csv")["prediccion"].to_numpy()
+    assert (high - low).mean() > 10.0  # +5 C de temperatura futura -> mas demanda
+
+
+def test_exogenous_model_reports_missing_future_variables_explicitly(tmp_path):
+    rng = np.random.default_rng(28)
+    index_length = 1200
+    temperature = 20 + 6 * np.sin(np.arange(index_length) * 2 * np.pi / 96) + rng.normal(scale=0.2, size=index_length)
+    values = 100 + 9 * (temperature - 20) + rng.normal(scale=0.5, size=index_length)
+    config, layout = _run_pipeline(tmp_path, "run-missing-future-exog", values, temperature)
+    config = _with_tolerance(config, layout, 0.5)
+    stamps = pd.date_range(pd.Timestamp("2025-01-01") + pd.Timedelta(minutes=15 * index_length), periods=96, freq="15min")
+    wrong = pd.DataFrame({"otra": np.zeros(96)}, index=stamps)
+
+    result = run_prediction(config, layout, future_exog=wrong)
+
+    summary = pd.read_csv(result.output / "csv" / "resumen_prediccion.csv")
+    assert summary.loc[0, "estado"] == "REQUIERE_EXOGENAS_FUTURAS"
+    assert "NO_PROVISTAS" in summary.loc[0, "exogenas_futuras"]
+    assert not (result.output / "series" / "M1_P" / "csv" / "pronostico_operativo.csv").exists()
